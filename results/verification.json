@@ -1,0 +1,146 @@
+{
+  "all_elec_conservation_pass": true,
+  "all_thermal_conservation_pass": true,
+  "max_elec_residual_mwh": 7.958078640513122e-13,
+  "max_thermal_residual_mj": 1.1129239751994646e-09,
+  "conservation_runs": [
+    {
+      "duty_code": "reserve_035",
+      "cooling_code": "liquid",
+      "e_in_pcc_mwh": 775.72814237,
+      "e_out_pcc_mwh": 573.44624449,
+      "de_stored_mwh": 0.0,
+      "sum_losses_mwh": 202.281898,
+      "elec_residual_mwh": 1.4210854715202004e-13,
+      "thermal_residual_mj": 7.879208396843751e-10,
+      "elec_pass_1e6_mwh": true,
+      "thermal_pass_1e6_mj": true
+    },
+    {
+      "duty_code": "reserve_035",
+      "cooling_code": "air",
+      "e_in_pcc_mwh": 794.52754336,
+      "e_out_pcc_mwh": 572.28571563,
+      "de_stored_mwh": 0.0,
+      "sum_losses_mwh": 222.241828,
+      "elec_residual_mwh": 5.684341886080802e-14,
+      "thermal_residual_mj": 2.8915092542547427e-11,
+      "elec_pass_1e6_mwh": true,
+      "thermal_pass_1e6_mj": true
+    },
+    {
+      "duty_code": "da_100",
+      "cooling_code": "liquid",
+      "e_in_pcc_mwh": 2001.35607545,
+      "e_out_pcc_mwh": 1684.64289013,
+      "de_stored_mwh": 0.0,
+      "sum_losses_mwh": 316.713185,
+      "elec_residual_mwh": 4.547473508864641e-13,
+      "thermal_residual_mj": 1.1129239751994646e-09,
+      "elec_pass_1e6_mwh": true,
+      "thermal_pass_1e6_mj": true
+    },
+    {
+      "duty_code": "da_100",
+      "cooling_code": "air",
+      "e_in_pcc_mwh": 2021.23316045,
+      "e_out_pcc_mwh": 1670.7453052,
+      "de_stored_mwh": 0.0,
+      "sum_losses_mwh": 350.487855,
+      "elec_residual_mwh": 2.8421709430404007e-13,
+      "thermal_residual_mj": 1.2207257427121476e-10,
+      "elec_pass_1e6_mwh": true,
+      "thermal_pass_1e6_mj": true
+    },
+    {
+      "duty_code": "heavy_200",
+      "cooling_code": "liquid",
+      "e_in_pcc_mwh": 3975.78222247,
+      "e_out_pcc_mwh": 3352.44959397,
+      "de_stored_mwh": 0.0,
+      "sum_losses_mwh": 623.332628,
+      "elec_residual_mwh": 7.958078640513122e-13,
+      "thermal_residual_mj": 1.0401599581655319e-09,
+      "elec_pass_1e6_mwh": true,
+      "thermal_pass_1e6_mj": true
+    },
+    {
+      "duty_code": "heavy_200",
+      "cooling_code": "air",
+      "e_in_pcc_mwh": 3996.59298648,
+      "e_out_pcc_mwh": 3333.17049708,
+      "de_stored_mwh": 0.0,
+      "sum_losses_mwh": 663.422489,
+      "elec_residual_mwh": 2.2737367544323206e-13,
+      "thermal_residual_mj": 2.1969892571860328e-10,
+      "elec_pass_1e6_mwh": true,
+      "thermal_pass_1e6_mj": true
+    }
+  ],
+  "parameter_recovery": {
+    "truth": {
+      "b0_kw": 5.0,
+      "h_kw_per_k": 0.85,
+      "t_h_c": 12.0,
+      "c_kw_per_k": 0.62,
+      "t_c_c": 18.0,
+      "k_kw_per_mw": 1.4
+    },
+    "estimate": {
+      "b0_kw": 4.9997,
+      "h_kw_per_k": 0.85,
+      "t_h_c": 12.0,
+      "c_kw_per_k": 0.6202,
+      "t_c_c": 18.0,
+      "k_kw_per_mw": 1.3999,
+      "r2": 0.99993,
+      "rmse_kw": 0.0402
+    },
+    "abs_errors": {
+      "b0_kw": 0.0003,
+      "h_kw_per_k": 0.0,
+      "t_h_c": 0.0,
+      "c_kw_per_k": 0.0002,
+      "t_c_c": 0.0,
+      "k_kw_per_mw": 0.0001
+    }
+  },
+  "physical_telemetry_surrogate_fits": {
+    "liquid_da_100": {
+      "physical_known": {
+        "bms_plus_idle_pump_kw": 3.29,
+        "t_heat_threshold_c": 12.0,
+        "wall_ua_kw_per_k": 0.115,
+        "cop_20c": 3.4
+      },
+      "piecewise_fit": {
+        "b0_kw": 3.6687,
+        "h_kw_per_k": 0.5876,
+        "t_h_c": 8.0,
+        "c_kw_per_k": 0.5841,
+        "t_c_c": 16.5,
+        "k_kw_per_mw": 0.0,
+        "r2": 0.16931,
+        "rmse_kw": 5.5158
+      }
+    },
+    "air_da_100": {
+      "physical_known": {
+        "bms_plus_idle_fan_kw": 3.35,
+        "t_heat_threshold_c": 12.0,
+        "wall_ua_kw_per_k": 0.195,
+        "cop_20c": 2.55
+      },
+      "piecewise_fit": {
+        "b0_kw": 4.4783,
+        "h_kw_per_k": 0.86,
+        "t_h_c": 8.0,
+        "c_kw_per_k": 1.028,
+        "t_c_c": 16.5,
+        "k_kw_per_mw": 0.0,
+        "r2": 0.20232,
+        "rmse_kw": 7.4373
+      }
+    }
+  }
+}

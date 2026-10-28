@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bess-thermal-aux-load"
+version = "0.1.0"
+description = "Lumped thermal and auxiliary-power model of a 5 MWh LFP battery container in Polish weather: Joule and entropic heat, liquid-cooling chiller COP, winter heating, PCS/transformer losses, and why net AC-AC round-trip efficiency drops in winter and at low cycling."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Konrad Waleszczyński" }]
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+bess-thermal = "bess_thermal.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
