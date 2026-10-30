@@ -1,267 +1,307 @@
-"""Comprehensive test suite for bess-thermal-aux-load."""
+"""Property and invariant tests for bess-thermal-aux-load (no network, no pinned result values)."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from bess_thermal.cli import main as cli_main
-from bess_thermal.config import COOLING_SYSTEMS, DUTY_SPECS, ContainerSpec, PcsTransformerSpec
+from bess_thermal.config import COOLING_SYSTEMS, DUTY_SPECS, ChillerSpec, ContainerSpec, PcsTransformerSpec
 from bess_thermal.duties import build_hourly_duty_profile
 from bess_thermal.physics import (
+    cell_entropic_coeff_v_per_k,
     cell_heat_generation_kw,
-    cell_internal_resistance_ohm,
+    cell_ocv_v,
     chiller_cop,
-    entropic_coeff_v_per_k,
-    evaluate_steady_aux_vs_temperature,
-    ocv_pack_voltage_v,
+    dc_rte_constant_power,
+    pack_ocv_v,
+    pack_resistance_ohm,
+    pcs_efficiency,
     pcs_loss_kw,
     transformer_losses_kw,
 )
-from bess_thermal.simulation import compute_window_rte, simulate_container_year
+from bess_thermal.simulation import (
+    compute_window_rte,
+    run_container,
+    simulate_container_year,
+    steady_aux_vs_temperature,
+)
 from bess_thermal.verification import (
+    check_idle_heater_steady_state,
+    check_integrator_against_exact,
+    check_timestep_convergence,
     fit_piecewise_linear_aux_model,
     generate_synthetic_telemetry_for_recovery,
-    run_verification_suite,
 )
-from bess_thermal.weather import generate_polish_weather_8760
+from bess_thermal.weather import load_weather
+
+REPO = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope="module")
-def weather_8760():
-    return generate_polish_weather_8760()
+def weather():
+    return load_weather()
 
 
 @pytest.fixture(scope="module")
-def all_sim_runs(weather_8760):
-    runs = {}
-    for d in DUTY_SPECS:
-        for c in COOLING_SYSTEMS:
-            runs[(d, c)] = simulate_container_year(weather_8760, duty_code=d, cooling_code=c)
-    return runs
+def runs(weather):
+    return {(d, c): simulate_container_year(weather, d, c) for d in DUTY_SPECS for c in COOLING_SYSTEMS}
 
 
-def test_weather_profile_shape_and_extremes(weather_8760):
-    assert len(weather_8760) == 8760
-    assert set(weather_8760["month"].unique()) == set(range(1, 13))
-    # January cold snap reaches below -11.5 degC and July heatwave exceeds +32.5 degC
-    jan_min = float(weather_8760.loc[weather_8760["month"] == 1, "t_amb_c"].min())
-    jul_max = float(weather_8760.loc[weather_8760["month"] == 7, "t_amb_c"].max())
-    assert -15.0 <= jan_min <= -11.5
-    assert 32.5 <= jul_max <= 36.0
-    assert float(weather_8760["g_poa_wm2"].min()) == 0.0
-    assert float(weather_8760["g_poa_wm2"].max()) > 750.0
+def test_weather_file_is_a_complete_hourly_year(weather):
+    assert len(weather) == 8760
+    steps = weather["timestamp"].diff().dropna().unique()
+    assert len(steps) == 1 and steps[0] == pd.Timedelta(hours=1)
+    assert weather[["t_amb_c", "ghi_wm2"]].notna().all().all()
+    assert set(weather["month"]) == set(range(1, 13))
+    assert weather["t_amb_c"].between(-35.0, 42.0).all()
+    assert (weather["ghi_wm2"] >= 0.0).all()
+    # No sun at midnight CET, and summer is warmer and brighter than winter
+    assert (weather.loc[weather["hour"] == 0, "ghi_wm2"] == 0.0).all()
+    by_month = weather.groupby("month")[["t_amb_c", "ghi_wm2"]].mean()
+    assert by_month.loc[7, "t_amb_c"] > by_month.loc[1, "t_amb_c"] + 10.0
+    assert by_month.loc[6, "ghi_wm2"] > 4.0 * by_month.loc[12, "ghi_wm2"]
 
 
-def test_arrhenius_internal_resistance_doubles_from_25c_to_5c():
+def test_resistance_arrhenius_and_soc_shape():
+    assert pack_resistance_ohm(5.0) / pack_resistance_ohm(25.0) == pytest.approx(2.0, rel=1e-5)
+    t = np.linspace(-10.0, 45.0, 56)
+    assert np.all(np.diff(pack_resistance_ohm(t)) < 0.0)
+    assert pack_resistance_ohm(25.0, 0.05) > pack_resistance_ohm(25.0, 0.5) < pack_resistance_ohm(25.0, 0.95)
     spec = ContainerSpec()
-    r_25 = cell_internal_resistance_ohm(25.0, 0.50, spec)
-    r_5 = cell_internal_resistance_ohm(5.0, 0.50, spec)
-    r_15 = cell_internal_resistance_ohm(15.0, 0.50, spec)
-    assert r_5 / r_25 == pytest.approx(2.0, rel=1e-5)
-    assert r_25 < r_15 < r_5
+    expected = spec.cell_r25_mohm / 1000.0 * spec.n_series / spec.n_parallel
+    assert pack_resistance_ohm(25.0, 0.5) == pytest.approx(expected, rel=1e-12)
 
 
-def test_internal_resistance_soc_dependence():
-    r_mid = cell_internal_resistance_ohm(25.0, 0.50)
-    r_low = cell_internal_resistance_ohm(25.0, 0.05)
-    r_high = cell_internal_resistance_ohm(25.0, 0.95)
-    assert r_low > r_mid
-    assert r_high > r_mid
+def test_ocv_monotonic_and_entropic_sign_change():
+    soc = np.linspace(0.01, 0.99, 197)
+    assert np.all(np.diff(cell_ocv_v(soc)) > 0.0)
+    assert 3.0 < cell_ocv_v(0.05) < cell_ocv_v(0.5) < cell_ocv_v(0.95) < 3.4
+    assert pack_ocv_v(0.5) == pytest.approx(ContainerSpec().n_series * cell_ocv_v(0.5))
+    du = cell_entropic_coeff_v_per_k(soc)
+    assert du.min() < 0.0 < du.max()
+    assert np.abs(du).max() < 0.5e-3
 
 
-def test_ocv_and_entropic_coefficient_plateaus():
-    u_low = ocv_pack_voltage_v(0.10)
-    u_mid = ocv_pack_voltage_v(0.50)
-    u_high = ocv_pack_voltage_v(0.90)
-    assert 760.0 < u_low < u_mid < u_high < 835.0
-    # Entropic coefficient changes sign between low SoC (<0.20) and upper plateau (0.75)
-    du_low = entropic_coeff_v_per_k(0.12)
-    du_high = entropic_coeff_v_per_k(0.75)
-    assert du_low < 0.0
-    assert du_high > 0.0
+def test_heat_generation_bernardi_signs():
+    soc = 0.75
+    assert cell_entropic_coeff_v_per_k(soc) > 0.0
+    q_irr_d, q_rev_d, i_d, _ = cell_heat_generation_kw(1000.0, 20.0, soc)
+    q_irr_c, q_rev_c, i_c, _ = cell_heat_generation_kw(-1000.0, 20.0, soc)
+    assert i_d == pytest.approx(-i_c)
+    # Irreversible heat is direction-independent; reversible heat is endothermic on discharge when dU/dT > 0
+    assert q_irr_d == pytest.approx(q_irr_c) and q_irr_d > 0.0
+    assert q_rev_d < 0.0 < q_rev_c
+    assert q_rev_d == pytest.approx(-q_rev_c)
+    # More power and colder cells mean more irreversible heat
+    assert cell_heat_generation_kw(2000.0, 20.0, soc)[0] > q_irr_d
+    assert cell_heat_generation_kw(1000.0, 5.0, soc)[0] > q_irr_d
+    assert cell_heat_generation_kw(0.0, 20.0, soc)[:2] == (0.0, 0.0)
 
 
-def test_joule_and_reversible_heat_generation():
-    q_j_dis, q_rev_dis, q_tot_dis, r_mohm, i_dis = cell_heat_generation_kw(1000.0, 20.0, 0.70)
-    q_j_ch, q_rev_ch, q_tot_ch, _, i_ch = cell_heat_generation_kw(-1000.0, 20.0, 0.70)
-    assert q_j_dis > 0.0
-    assert q_j_dis == pytest.approx(q_j_ch, rel=1e-9)
-    assert i_dis == pytest.approx(-i_ch, rel=1e-9)
-    # Reversible entropic heat reverses sign between charge and discharge at identical state
-    assert q_rev_dis == pytest.approx(-q_rev_ch, rel=1e-9)
-    assert q_tot_dis == pytest.approx(q_j_dis + q_rev_dis, rel=1e-9)
-    assert r_mohm > 10.0
+def test_dc_rte_falls_with_c_rate_and_cold():
+    rates = [0.05, 0.1, 0.25, 0.5, 1.0]
+    vals = [dc_rte_constant_power(c) for c in rates]
+    assert all(0.0 < v < 1.0 for v in vals)
+    assert all(a > b for a, b in zip(vals, vals[1:]))
+    assert dc_rte_constant_power(0.25, 10.0) < dc_rte_constant_power(0.25, 25.0) < dc_rte_constant_power(0.25, 40.0)
 
 
-def test_chiller_carnot_derated_cop():
-    liq = COOLING_SYSTEMS["liquid"]
-    air = COOLING_SYSTEMS["air"]
-    assert chiller_cop(20.0, liq) == pytest.approx(3.40, abs=1e-4)
-    assert chiller_cop(35.0, liq) == pytest.approx(2.10, abs=1e-4)
-    assert chiller_cop(20.0, air) < chiller_cop(20.0, liq)
-    assert chiller_cop(35.0, air) < chiller_cop(35.0, liq)
+def test_chiller_cop_physics():
+    chiller = ChillerSpec()
+    for cooling in COOLING_SYSTEMS.values():
+        t_amb = np.linspace(-20.0, 40.0, 61)
+        cop = chiller_cop(20.0, t_amb, cooling, chiller)
+        assert np.all(cop > 0.0) and np.all(cop <= chiller.cop_max)
+        assert np.all(np.diff(cop) <= 1e-12)
+        assert chiller_cop(20.0, 35.0, cooling, chiller) < chiller.cop_max
+        assert chiller_cop(25.0, 35.0, cooling, chiller) > chiller_cop(15.0, 35.0, cooling, chiller)
+    # Same cold-side temperature: the larger evaporator approach of the air unit costs COP
+    assert chiller_cop(20.0, 35.0, COOLING_SYSTEMS["air"]) < chiller_cop(20.0, 35.0, COOLING_SYSTEMS["liquid"])
 
 
 def test_pcs_and_transformer_loss_curves():
-    pcs_spec = PcsTransformerSpec()
-    assert pcs_loss_kw(0.0, pcs_spec) == 0.0
-    l_half = pcs_loss_kw(1250.0, pcs_spec)
-    l_full = pcs_loss_kw(2500.0, pcs_spec)
-    assert 0.0 < l_half < l_full
-
-    fe_on, cu_rated = transformer_losses_kw(2500.0, pcs_spec, include_core_loss=True)
-    fe_off, cu_idle = transformer_losses_kw(0.0, pcs_spec, include_core_loss=False)
-    assert fe_on == pytest.approx(4.2, abs=1e-6)
-    assert cu_rated == pytest.approx(24.0, abs=1e-6)
-    assert fe_off == 0.0
-    assert cu_idle == 0.0
+    spec = PcsTransformerSpec()
+    assert pcs_loss_kw(0.0, spec) == spec.pcs_standby_kw
+    p = np.linspace(100.0, 2500.0, 25)
+    assert np.all(np.diff(pcs_loss_kw(p, spec)) > 0.0)
+    assert all(0.95 < pcs_efficiency(x, spec) < 1.0 for x in (0.1, 0.25, 0.5, 1.0))
+    p0_a, pk_a = transformer_losses_kw(1250.0, spec)
+    p0_b, pk_b = transformer_losses_kw(2500.0, spec)
+    assert p0_a == p0_b == spec.trafo_p0_kw
+    assert pk_b == pytest.approx(4.0 * pk_a) and pk_b == pytest.approx(spec.trafo_pk_kw)
 
 
-@pytest.mark.parametrize(
-    "duty_code,expected_cpd",
-    [("reserve_035", 0.35), ("da_100", 1.0), ("heavy_200", 2.0)],
-)
-def test_hourly_duty_profiles_charge_neutral(duty_code, expected_cpd):
+@pytest.mark.parametrize("duty_code", list(DUTY_SPECS))
+def test_duty_profiles_charge_neutral(duty_code):
     df = build_hourly_duty_profile(duty_code)
+    cap = ContainerSpec().rated_energy_kwh
     assert len(df) == 8760
-    assert df["e_stored_start_kwh"].iloc[0] == pytest.approx(2500.0, abs=1e-6)
-    assert df["e_stored_end_kwh"].iloc[-1] == pytest.approx(2500.0, abs=1e-6)
-    total_dis_mwh = float(np.sum(np.maximum(df["p_chem_kw"], 0.0)) / 1000.0)
-    assert total_dis_mwh == pytest.approx(expected_cpd * 5.0 * 365.0, rel=1e-6)
-    assert float(df["soc_start"].min()) >= 0.0
-    assert float(df["soc_end"].max()) <= 1.0
+    daily = df["e_stored_end_kwh"].to_numpy()[23::24]
+    assert np.allclose(daily, 0.5 * cap)
+    dis_mwh = float(np.sum(np.maximum(df["p_chem_kw"], 0.0)) / 1000.0)
+    assert dis_mwh == pytest.approx(DUTY_SPECS[duty_code].cycles_per_day * cap / 1000.0 * 365.0)
+    assert df["soc_start"].min() >= 0.0 and df["soc_end"].max() <= 1.0
 
 
-def test_first_law_electrical_conservation_all_runs(all_sim_runs):
-    for (duty_code, cool_code), res in all_sim_runs.items():
+def test_plant_energy_balance_closes(runs):
+    for key, res in runs.items():
+        b = res["energy_balance"]
+        assert b["residual_mwh"] < 1e-6, key
+        assert b["net_import_pcc_mwh"] > 0.0
+
+
+def test_rte_ordering_across_boundaries(runs):
+    for key, res in runs.items():
         s = res["summary"]
-        lhs = s["e_in_pcc_mwh"] - s["e_out_pcc_mwh"] - s["de_stored_mwh"]
-        rhs = (
-            s["e_joule_mwh"]
-            + s["e_entropic_mwh"]
-            + s["e_pcs_mwh"]
-            + s["e_trafo_fe_mwh"]
-            + s["e_trafo_cu_mwh"]
-            + s["e_aux_mwh"]
+        assert 1.0 > s["rte_dc"] > s["rte_pcs_ac"] > s["rte_trafo_mv"] > s["rte_pcc_net"] > 0.0, key
+        assert s["rte_pcs_ac"] > s["rte_lv_net"] > s["rte_pcc_net"], key
+        m = res["monthly_df"]
+        assert s["rte_pcc_month_min"] <= s["rte_pcc_net"] <= s["rte_pcc_month_max"]
+        assert m["rte_pcc_net"].min() == s["rte_pcc_month_min"]
+
+
+def test_aux_components_and_conversion_factors(runs):
+    c, h = ContainerSpec(), ChillerSpec()
+    for key, res in runs.items():
+        s = res["summary"]
+        parts = s["e_bms_mwh"] + s["e_circ_mwh"] + s["e_heater_mwh"] + s["e_chiller_mwh"]
+        assert s["e_aux_mwh"] == pytest.approx(parts, abs=1e-6), key
+        assert s["e_bms_mwh"] == pytest.approx(c.bms_base_load_kw * 8.76, rel=1e-9)
+        assert s["e_heater_mwh"] == pytest.approx(s["e_heat_th_mwh"] / c.heater_efficiency, abs=1e-9)
+        if s["e_chiller_mwh"] > 0.0:
+            assert s["e_cool_th_mwh"] <= h.cop_max * s["e_chiller_mwh"] + 1e-9
+            assert 0.0 < s["cop_mean"] <= h.cop_max
+
+
+def test_inlined_loop_physics_matches_physics_module():
+    """Sub-step heat and COP computed inside the solver loop must equal the reference functions in physics.py."""
+    spec = ContainerSpec()
+    duty = build_hourly_duty_profile("heavy_200", n_hours=48)
+    for cool_code, cooling in COOLING_SYSTEMS.items():
+        res = run_container(
+            np.full(48, 30.0), np.full(48, 300.0), duty["p_chem_kw"].to_numpy(), duty["soc_start"].to_numpy(),
+            duty["soc_end"].to_numpy(), cooling, spec, t_init_c=(20.0, 20.0), record_hours=np.ones(48, dtype=bool),
         )
-        assert abs(lhs - rhs) < 1e-6, f"Failed electrical balance for {duty_code}/{cool_code}"
-        assert s["elec_balance_residual_mwh"] < 1e-6
+        t_start = 20.0
+        n_cop = 0
+        for r in res["records"]:
+            q_irr, q_rev, _, r_mohm = cell_heat_generation_kw(r["p_chem_kw"], t_start, r["soc"], spec)
+            assert r["q_irr_kw"] == pytest.approx(q_irr, rel=1e-9, abs=1e-12)
+            assert r["q_rev_kw"] == pytest.approx(q_rev, rel=1e-9, abs=1e-12)
+            assert r["r_int_mohm"] == pytest.approx(r_mohm, rel=1e-9)
+            if r["q_cool_kw"] > 0.0:
+                n_cop += 1
+                assert r["cop"] == pytest.approx(chiller_cop(r["t_enc_c"], r["t_amb_c"], cooling), rel=1e-9)
+                assert r["p_chiller_kw"] == pytest.approx(r["q_cool_kw"] / r["cop"], rel=1e-9)
+            t_start = r["t_cell_c"]
+        assert n_cop > 0
 
 
-def test_first_law_thermal_conservation_all_runs(all_sim_runs):
-    for (duty_code, cool_code), res in all_sim_runs.items():
+def test_cell_temperature_stays_in_control_band(runs):
+    c = ContainerSpec()
+    for (d, cool), res in runs.items():
         s = res["summary"]
-        assert s["thermal_balance_residual_mj"] < 1e-6, f"Failed thermal balance for {duty_code}/{cool_code}"
+        assert s["t_cell_min_c"] >= c.t_heat_set_c - 1e-6, (d, cool)
+        tol = 1e-6 if cool == "liquid" else 1.0
+        assert s["t_cell_max_c"] <= c.t_cool_set_c + tol, (d, cool)
 
 
-def test_metering_boundary_rte_waterfall_ordering(all_sim_runs):
-    for _, res in all_sim_runs.items():
-        s = res["summary"]
-        assert 1.0 > s["rte_dc"] > s["rte_pcs_ac"] > s["rte_trafo_mv"] > s["rte_pcc_net"] > 0.65
-        assert s["rte_lv_with_aux"] > s["rte_pcc_net"]
+def test_more_cycling_more_cell_loss_lower_dc_rte(runs):
+    for cool in COOLING_SYSTEMS:
+        loss = [runs[(d, cool)]["summary"]["e_cell_loss_mwh"] for d in DUTY_SPECS]
+        dc = [runs[(d, cool)]["summary"]["rte_dc"] for d in DUTY_SPECS]
+        assert loss[0] < loss[1] < loss[2]
+        assert dc[0] > dc[1] > dc[2]
 
 
-def test_key_engineering_findings_da100_and_heavy200(all_sim_runs):
-    da_liq = all_sim_runs[("da_100", "liquid")]["summary"]
-    da_air = all_sim_runs[("da_100", "air")]["summary"]
-    hv_liq = all_sim_runs[("heavy_200", "liquid")]["summary"]
-
-    # DC cell-terminal RTE ~94.2% at 1 cyc/day, dropping to ~91.8% at 2 cyc/day
-    assert da_liq["rte_dc"] == pytest.approx(0.942, abs=0.002)
-    assert hv_liq["rte_dc"] == pytest.approx(0.918, abs=0.002)
-    # PCS AC-terminal RTE ~89.6% at 1 cyc/day
-    assert da_liq["rte_pcs_ac"] == pytest.approx(0.896, abs=0.002)
-    # Net PCC RTE ~84.1% (Liquid) vs ~82.6% (Air) at 1 cyc/day
-    assert da_liq["rte_pcc_net"] == pytest.approx(0.841, abs=0.002)
-    assert da_air["rte_pcc_net"] == pytest.approx(0.826, abs=0.002)
-    # Seasonal swing: ~79.4% in January, ~82.8% in July, peaking at ~85.7% in May/September
-    assert da_liq["rte_jan_pcc"] == pytest.approx(0.794, abs=0.003)
-    assert da_liq["rte_jul_pcc"] == pytest.approx(0.828, abs=0.003)
-    assert da_liq["rte_may_pcc"] == pytest.approx(0.857, abs=0.003)
-    assert da_liq["rte_sep_pcc"] == pytest.approx(0.857, abs=0.003)
+def test_air_cooling_needs_more_aux_than_liquid(runs):
+    for d in DUTY_SPECS:
+        liq, air = runs[(d, "liquid")]["summary"], runs[(d, "air")]["summary"]
+        assert air["e_aux_mwh"] > liq["e_aux_mwh"]
+        if liq["cop_mean"] and air["cop_mean"]:
+            assert air["cop_mean"] <= liq["cop_mean"] + 1e-9
 
 
-def test_low_cycling_reserve_duty_standing_losses(all_sim_runs):
-    res_liq = all_sim_runs[("reserve_035", "liquid")]["summary"]
-    assert res_liq["e_trafo_fe_mwh"] == pytest.approx(36.8, abs=0.1)
-    assert res_liq["e_bms_mwh"] == pytest.approx(28.0, abs=0.1)
-    assert res_liq["e_ptc_mwh"] == pytest.approx(24.5, abs=0.6)
-    assert res_liq["e_standing_parasitic_mwh"] == pytest.approx(89.3, abs=1.0)
-    assert res_liq["rte_pcc_net"] == pytest.approx(0.738, abs=0.003)
-    assert res_liq["months_below_85_pct_guarantee"] >= 11
+def test_steady_aux_responds_to_temperature_and_load():
+    t = np.array([-15.0, 5.0, 15.0, 35.0])
+    out = steady_aux_vs_temperature(t, c_rates=(0.0, 0.25), days=4, avg_days=1)
+    for cool in COOLING_SYSTEMS:
+        idle, cyc = out[cool]["c_0.00"], out[cool]["c_0.25"]
+        assert idle[3] > idle[2]
+        assert idle[1] == pytest.approx(ContainerSpec().bms_base_load_kw, abs=1e-6)
+        assert all(cv >= iv - 1e-9 for cv, iv in zip(cyc, idle))
+        assert cyc[3] > cyc[0]
 
 
-def test_liquid_vs_air_cooling_spread_and_hvac_savings(all_sim_runs):
-    da_liq = all_sim_runs[("da_100", "liquid")]["summary"]
-    da_air = all_sim_runs[("da_100", "air")]["summary"]
-    assert da_liq["max_temp_spread_k"] == pytest.approx(2.4, abs=0.05)
-    assert da_air["max_temp_spread_k"] == pytest.approx(7.8, abs=0.05)
-
-    saved_mwh = da_air["e_aux_mwh"] - da_liq["e_aux_mwh"]
-    saved_pct = 100.0 * saved_mwh / da_air["e_aux_mwh"]
-    assert saved_mwh == pytest.approx(18.5, abs=0.4)
-    assert saved_pct == pytest.approx(26.0, abs=1.0)
+def test_integrator_matches_matrix_exponential():
+    for cool in COOLING_SYSTEMS:
+        r = check_integrator_against_exact(cooling_code=cool)
+        assert r["pass_0p1_k"], r
 
 
-def test_winter_cell_temperature_floor_maintained(all_sim_runs):
-    for (duty_code, cool_code), res in all_sim_runs.items():
-        # PTC heater keeps cells above lithium-plating danger zone even when T_amb drops to -12.2 degC
-        assert res["summary"]["t_cell_min_c"] >= 11.5, f"Cell temp too cold in {duty_code}/{cool_code}"
+def test_idle_heater_matches_closed_form():
+    for cool in COOLING_SYSTEMS:
+        r = check_idle_heater_steady_state(cooling_code=cool)
+        assert r["heater_closed_form_kw"] > 0.0
+        assert r["pass"], r
 
 
-def test_piecewise_linear_aux_parameter_recovery(weather_8760, all_sim_runs):
-    da_liq_df = all_sim_runs[("da_100", "liquid")]["hourly_df"]
-    df_tel, truth = generate_synthetic_telemetry_for_recovery(weather_8760, da_liq_df)
-    est = fit_piecewise_linear_aux_model(
-        df_tel["t_amb_c"].to_numpy(),
-        df_tel["p_pcs_mw"].to_numpy(),
-        df_tel["p_aux_meas_kw"].to_numpy(),
-    )
-    assert est["b0_kw"] == pytest.approx(truth["b0_kw"], abs=0.05)
-    assert est["h_kw_per_k"] == pytest.approx(truth["h_kw_per_k"], abs=0.05)
-    assert est["t_h_c"] == pytest.approx(truth["t_h_c"], abs=0.5)
-    assert est["c_kw_per_k"] == pytest.approx(truth["c_kw_per_k"], abs=0.05)
-    assert est["t_c_c"] == pytest.approx(truth["t_c_c"], abs=0.5)
-    assert est["k_kw_per_mw"] == pytest.approx(truth["k_kw_per_mw"], abs=0.05)
-    assert est["r2"] > 0.999
+def test_timestep_convergence(weather):
+    r = check_timestep_convergence(weather, cooling_code="air")
+    assert r["pass"], r
+
+
+def test_estimator_recovers_known_parameters(weather, runs):
+    df_tel, truth = generate_synthetic_telemetry_for_recovery(weather, runs[("da_100", "liquid")]["hourly_df"])
+    est = fit_piecewise_linear_aux_model(df_tel["t_amb_c"], df_tel["p_pcs_mw"], df_tel["p_aux_meas_kw"])
+    for k in ("b0_kw", "h_kw_per_k", "c_kw_per_k", "k_kw_per_mw"):
+        assert est[k] == pytest.approx(truth[k], abs=0.05), k
+    for k in ("t_h_c", "t_c_c"):
+        assert est[k] == pytest.approx(truth[k], abs=0.5), k
 
 
 def test_soc_corrected_window_rte_formula():
     assert compute_window_rte(100.0, 85.0, 0.0) == pytest.approx(0.85, abs=1e-9)
-    # Positive dE_stored increases corrected RTE relative to raw E_out / E_in
     assert compute_window_rte(100.0, 80.0, 5.0, eta_oneway=0.92) > 0.80
-    # Negative dE_stored decreases corrected RTE relative to raw E_out / E_in
     assert compute_window_rte(100.0, 90.0, -5.0, eta_oneway=0.92) < 0.90
 
 
-def test_steady_aux_vs_temperature_monotonic_tails():
-    t_grid = np.linspace(-15.0, 35.0, 51)
-    curves = evaluate_steady_aux_vs_temperature(t_grid)
-    liq_05 = curves["liquid"]["c_0.50"]
-    air_05 = curves["air"]["c_0.50"]
-    # Cold extreme (-15 degC) and hot extreme (+35 degC) both exceed mild 15 degC auxiliary draw
-    idx_15c = int(np.argmin(np.abs(t_grid - 15.0)))
-    assert liq_05[0] > liq_05[idx_15c]
-    assert liq_05[-1] > liq_05[idx_15c]
-    assert max(air_05) > max(liq_05)
+def test_dashboard_has_no_hard_coded_results():
+    html = (REPO / "docs" / "index.html").read_text(encoding="utf-8")
+    static = re.sub(r"<script>.*?</script>", "", html, flags=re.DOTALL)
+    assert not re.search(r"\d+\.\d+\s*%", static), "percentages must come from data.js"
+    assert not re.search(r"\d+\.\d+\s*MWh", static), "energies must come from data.js"
 
 
-def test_verification_suite_and_cli_artifacts(tmp_path: Path):
-    rc = cli_main(["run", "--out", str(tmp_path)])
-    assert rc == 0
-    assert (tmp_path / "results" / "annual_summary.csv").exists()
-    assert (tmp_path / "results" / "monthly_rte_losses.csv").exists()
-    assert (tmp_path / "results" / "verification.json").exists()
-    assert (tmp_path / "docs" / "data.js").exists()
-    assert (tmp_path / "docs" / ".nojekyll").exists()
+def test_cli_run_reproduces_committed_results(tmp_path: Path):
+    assert cli_main(["run", "--out", str(tmp_path)]) == 0
+    for name in ("annual_summary.csv", "monthly_rte_losses.csv", "sensitivity.csv", "verification.json"):
+        assert (tmp_path / "results" / name).exists()
     for png in (
         "monthly_rte_waterfall.png",
         "aux_vs_temperature.png",
         "winter_summer_week.png",
         "loss_breakdown_duty.png",
+        "sensitivity_tornado.png",
     ):
         p = tmp_path / "docs" / "img" / png
         assert p.exists() and p.stat().st_size > 15_000
+    assert (tmp_path / "docs" / "data.js").exists()
+
+    # Committed results, README tables and dashboard data must be what the code produces
+    for name in ("annual_summary.csv", "monthly_rte_losses.csv", "sensitivity.csv"):
+        new = pd.read_csv(tmp_path / "results" / name)
+        old = pd.read_csv(REPO / "results" / name)
+        assert list(new.columns) == list(old.columns), name
+        num = new.select_dtypes("number").columns
+        assert np.allclose(new[num].to_numpy(float), old[num].to_numpy(float), rtol=1e-6, atol=1e-6, equal_nan=True), name
+        assert new.drop(columns=num).equals(old.drop(columns=num)), name
+    tables = (tmp_path / "results" / "readme_tables.md").read_text(encoding="utf-8")
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    for block in tables.strip().split("\n\n"):
+        assert block in readme

@@ -1,0 +1,23 @@
+duty_code,cooling_code,parameter,base_value,low_value,high_value,rte_pcc_base,rte_pcc_low,rte_pcc_high,e_aux_base_mwh,e_aux_low_mwh,e_aux_high_mwh,e_heater_low_mwh,e_heater_high_mwh,swing_pp
+reserve_035,liquid,Envelope U-value [W/m2K],1.0,0.5,3.0,0.8984,0.8925,0.9011,18.367,22.877,15.233,0.0,0.26,0.86
+reserve_035,liquid,BMS/controls base load [kW],1.0,0.5,3.0,0.8984,0.9077,0.8635,18.367,11.404,45.483,0.0,0.0,4.42
+reserve_035,liquid,Cell DC resistance at 25 degC [mOhm],0.5,0.3,1.0,0.8984,0.9019,0.8902,18.367,18.037,18.886,0.0,0.0,1.17
+reserve_035,liquid,Cell voltage hysteresis [mV],10.0,0.0,20.0,0.8984,0.9048,0.8924,18.367,17.726,18.738,0.0,0.0,1.24
+reserve_035,liquid,Cooling set point [degC],25.0,22.0,30.0,0.8984,0.8959,0.9024,18.367,19.683,16.164,0.0,0.0,0.65
+reserve_035,liquid,Heating set point [degC],12.0,5.0,20.0,0.8984,0.8984,0.8984,18.367,18.367,18.367,0.0,0.0,0.0
+reserve_035,liquid,Circulation power [kW],1.5,0.75,3.0,0.8984,0.9041,0.8874,18.367,14.225,26.557,0.0,0.0,1.67
+reserve_035,liquid,Chiller Carnot fraction [-],0.38,0.25,0.5,0.8984,0.8981,0.8985,18.367,18.626,18.34,0.0,0.0,0.04
+reserve_035,liquid,PCS no-load loss [kW],5.0,2.5,10.0,0.8984,0.9086,0.8784,18.367,18.367,18.367,0.0,0.0,3.02
+reserve_035,liquid,Transformer no-load loss [kW],1.575,0.8,3.2,0.8984,0.9076,0.8797,18.367,18.367,18.367,0.0,0.0,2.79
+reserve_035,liquid,Ambient temperature shift [K],0.0,-5.0,5.0,0.8984,0.9012,0.8954,18.367,16.267,20.691,0.0,0.0,0.58
+da_100,liquid,Envelope U-value [W/m2K],1.0,0.5,3.0,0.9237,0.9226,0.9253,24.571,26.873,20.787,0.0,0.0,0.27
+da_100,liquid,BMS/controls base load [kW],1.0,0.5,3.0,0.9237,0.9267,0.9114,24.571,18.539,49.85,0.0,0.0,1.53
+da_100,liquid,Cell DC resistance at 25 degC [mOhm],0.5,0.3,1.0,0.9237,0.9301,0.9078,24.571,23.054,28.705,0.0,0.0,2.23
+da_100,liquid,Cell voltage hysteresis [mV],10.0,0.0,20.0,0.9237,0.9302,0.9172,24.571,23.012,26.227,0.0,0.0,1.3
+da_100,liquid,Cooling set point [degC],25.0,22.0,30.0,0.9237,0.9216,0.9268,24.571,25.945,22.507,0.0,0.0,0.52
+da_100,liquid,Heating set point [degC],12.0,5.0,20.0,0.9237,0.9237,0.9237,24.571,24.571,24.571,0.0,0.0,0.0
+da_100,liquid,Circulation power [kW],1.5,0.75,3.0,0.9237,0.9261,0.919,24.571,19.867,33.983,0.0,0.0,0.71
+da_100,liquid,Chiller Carnot fraction [-],0.38,0.25,0.5,0.9237,0.9234,0.9237,24.571,25.25,24.493,0.0,0.0,0.03
+da_100,liquid,PCS no-load loss [kW],5.0,2.5,10.0,0.9237,0.9297,0.9119,24.571,24.571,24.571,0.0,0.0,1.78
+da_100,liquid,Transformer no-load loss [kW],1.575,0.8,3.2,0.9237,0.9271,0.9167,24.571,24.571,24.571,0.0,0.0,1.04
+da_100,liquid,Ambient temperature shift [K],0.0,-5.0,5.0,0.9237,0.9244,0.9229,24.571,23.124,26.316,0.0,0.0,0.15

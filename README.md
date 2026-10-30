@@ -2,206 +2,328 @@
 
 [![tests](https://github.com/kwwaleszczynski-del/bess-thermal-aux-load/actions/workflows/ci.yml/badge.svg)](https://github.com/kwwaleszczynski-del/bess-thermal-aux-load/actions/workflows/ci.yml)
 
-Investment spreadsheets for utility-scale battery storage almost always treat AC-AC round-trip efficiency (RTE) as a
-single constant around 88 %. Once a container is connected through a step-up transformer to a 15 kV point of common
-coupling (PCC) in Central European weather, metered AC-AC efficiency is neither 88 % nor constant: it varies by
-more than 6 percentage points across the calendar year and by more than 10 percentage points between day-ahead
-arbitrage and low-cycling reserve duty.
+How much of the energy a battery container buys at the grid connection comes back, where the rest goes, and how
+much the weather matters. The repository models a generic 20-foot 2.5 MW / 5 MWh lithium iron phosphate (LFP)
+container hour by hour (15-minute sub-steps) over one year of ERA5 weather for Central Poland (52.2 N, 21.0 E, 2025):
 
-This repository models the coupled electro-thermal balance, auxiliary power consumption, and power-conversion loss
-chain of a 20-foot 2.5 MW / 5.0 MWh lithium iron phosphate (LFP) container over an 8,760-hour Polish meteorological
-year (52.2 N, 21.0 E):
+1. **Cell heat**: Joule heat with a temperature- and SoC-dependent resistance, a rate-independent LFP voltage
+   hysteresis, and reversible (entropic) heat.
+2. **Two-node thermal model** (cells, and coolant/air with racks and shell) for a **liquid-cooled** container (cold
+   plates, glycol chiller) and a **forced-air** container (DX air conditioner), both with an electric heater, an
+   insulated envelope and sol-air gain on the roof.
+3. **Auxiliary load**: chiller electricity from a Carnot-fraction COP, heater electricity, pump or fan power, and a
+   24/7 base load for BMS and controls.
+4. **Power chain** from the cells through the PCS and a 0.8/15 kV transformer to the point of common coupling (PCC),
+   giving the round-trip efficiency (RTE) at each metering boundary.
+5. **Checks that can fail**: a plant-level energy balance, the solver against an exact solution, time-step
+   convergence, a closed-form heater case, and a one-at-a-time sensitivity of every main assumption.
 
-1. **Cell internal heat generation (`Q_cell`)**: irreversible Joule heating with Arrhenius temperature-dependent and
-   SoC-dependent internal resistance (doubling between 25 degC and 5 degC), paired with reversible entropic heat across
-   the LFP open-circuit voltage plateaus.
-2. **Two-node thermal state-space (`T_cell`, `T_enc`)**: compares a **Liquid-Cooled Container** (aluminum cold plates,
-   water-glycol chiller, PTC heater, insulated 115 W/K enclosure) against a **Forced-Air Container** (rooftop DX unit,
-   supply/return blowers, 195 W/K enclosure) under ambient heat exchange and solar sol-air gain on the container roof.
-3. **HVAC and continuous auxiliary load (`P_aux`)**: Carnot-derated chiller COP (`COP = 3.4` at 20 degC falling to
-   `2.1` at 35 degC), glycol circulation pumps (`1.8 kW` when active), continuous BMS/EMS/fire-suppression controls
-   (`3.2 kW` = `28.0 MWh/yr`), and winter PTC heating (`COP = 0.98`) whenever `T_cell < 12 degC` to prevent lithium
-   plating during charging.
-4. **PCS and 0.8/15 kV MV step-up transformer losses**: bidirectional inverter switching and conduction loss curve plus
-   24/7 transformer iron core no-load loss (`P_fe = 4.2 kW` = `36.8 MWh/yr`) and quadratic copper load loss (`24.0 kW`
-   at rated 2.5 MVA).
-5. **First-law verification and telemetry parameter recovery**: exact electrical and thermal conservation over all
-   8,760 hours (`< 1e-12 MWh` and `< 1e-8 MJ`), and breakpoint grid-search + non-negative least squares (NNLS) recovery
-   of the empirical piecewise-linear auxiliary model used for operational LTSA reporting in the companion repository
-   [bess-ops-warranty](https://github.com/kwwaleszczynski-del/bess-ops-warranty).
+All inputs are stated, generic assumptions (table below), not data of a specific product, and no measured container
+data are used: the model is not validated against field measurements.
 
 Interactive dashboard: https://kwwaleszczynski-del.github.io/bess-thermal-aux-load/
 
+> **Revision note (30 October 2026).** An earlier version of this repository reported numbers that were partly set
+> by factors tuned to target values (month- and duty-specific multipliers on resistance, heater and chiller
+> electricity, PCS and transformer losses, and a cell temperature-spread series rescaled to fixed maxima) and ran on
+> a synthetic weather year. Those factors are gone: every number below comes from the single parameter set in
+> [Inputs](#inputs) and real ERA5 weather. The headline net RTE changed from 84.2 % to 92.4 % (1 cycle/day, liquid)
+> and from 73.9 % to 89.8 % (0.35 cycles/day); the large winter penalty and the cell-spread comparison do not survive.
+
 ## Key results
 
-### 1. Why a constant 88 % spreadsheet RTE fails at the 15 kV revenue meter
+### 1. Round-trip efficiency at each metering boundary
 
-Across 8,760 hours in Central Poland, a 2.5 MW / 5.0 MWh container is simulated under three operating regimes:
+Three stylised duties, each a fixed daily schedule that returns to 50 % SoC every day: 0.35 cycles/day (reserve-like,
+0.09 C), 1 cycle/day (day-ahead arbitrage, up to 0.18 C) and 2 cycles/day (up to 0.225 C). RTE at a boundary is the
+energy exported there over the energy imported there in the year; auxiliaries are supplied from the MV side, so the
+net RTE at the PCC includes them.
 
-1. **Low-cycling reserve / capacity market duty** (`0.35 cycles/day`, `128 cycles/yr`)
-2. **Day-ahead 1-cycle arbitrage** (`1.0 cycle/day`, `365 cycles/yr`)
-3. **Heavy 2-cycle arbitrage + intraday** (`2.0 cycles/day`, `730 cycles/yr`)
+<!-- results-tables:start -->
+| Duty | Cooling | DC | PCS AC | MV, excl. aux | LV net | **PCC net** | PCC net, lowest / highest month |
+|---|---|---|---|---|---|---|---|
+| 0.35 cycles/day (reserve) | Liquid (cold plates) | 98.5 % | 94.6 % | 92.4 % | 92.0 % | **89.8 %** | 89.0 % (Jul) / 90.4 % (Feb) |
+| 0.35 cycles/day (reserve) | Forced air (DX) | 98.5 % | 94.6 % | 92.4 % | 91.8 % | **89.7 %** | 89.0 % (Jul) / 90.2 % (Feb) |
+| 1.0 cycle/day (day-ahead) | Liquid (cold plates) | 97.9 % | 94.7 % | 93.6 % | 93.5 % | **92.4 %** | 92.2 % (Jul) / 92.5 % (Feb) |
+| 1.0 cycle/day (day-ahead) | Forced air (DX) | 97.9 % | 94.7 % | 93.6 % | 93.3 % | **92.2 %** | 92.0 % (Jul) / 92.3 % (Feb) |
+| 2.0 cycles/day (two-cycle) | Liquid (cold plates) | 97.3 % | 94.4 % | 93.4 % | 93.4 % | **92.5 %** | 92.4 % (Jul) / 92.5 % (Feb) |
+| 2.0 cycles/day (two-cycle) | Forced air (DX) | 97.3 % | 94.4 % | 93.4 % | 93.2 % | **92.3 %** | 92.1 % (Jul) / 92.4 % (Feb) |
 
-| Operating duty | Cooling architecture | DC cell RTE | PCS AC RTE (excl. aux) | MV trafo RTE (excl. aux) | Net 15 kV PCC RTE (annual) | Jan / Jul / May-Sep PCC RTE | Max cell spread | Annual aux load |
-|---|---|---|---|---|---|---|---|---|
-| 0.35 cyc/d (128 cyc/yr) | Liquid (cold plates) | 96.1 % | 85.7 % | 79.8 % | **73.9 %** | 67.6 % / 76.5 % / 77.0 % | 1.8 K | 56.1 MWh |
-| 0.35 cyc/d (128 cyc/yr) | Forced air (rooftop DX) | 95.9 % | 85.4 % | 79.6 % | **72.0 %** | 63.6 % / 76.2 % / 76.7 % | 5.6 K | 74.2 MWh |
-| 1.0 cyc/d (365 cyc/yr) | Liquid (cold plates) | **94.2 %** | **89.6 %** | **86.6 %** | **84.2 %** | **79.4 % / 82.8 % / 85.7 %** | **2.4 K** | **53.6 MWh** |
-| 1.0 cyc/d (365 cyc/yr) | Forced air (rooftop DX) | 93.4 % | 88.8 % | 85.9 % | **82.7 %** | 76.5 % / 80.7 % / 85.0 % | **7.8 K** | **72.0 MWh** |
-| 2.0 cyc/d (730 cyc/yr) | Liquid (cold plates) | **91.8 %** | 87.2 % | 85.4 % | **84.3 %** | 83.2 % / 83.8 % / 84.8 % | 3.1 K | 46.1 MWh |
-| 2.0 cyc/d (730 cyc/yr) | Forced air (rooftop DX) | 91.3 % | 86.7 % | 84.9 % | **83.4 %** | 82.1 % / 82.8 % / 84.0 % | 9.6 K | 66.5 MWh |
+| Duty | Cooling | PCC import [MWh/yr] | Aux total [MWh/yr] | Base load | Pump / fans | Chiller | Heater | Chiller COP (annual) | Cell temp. min-max [degC] |
+|---|---|---|---|---|---|---|---|---|---|
+| 0.35 cycles/day (reserve) | Liquid (cold plates) | 683 | 18.4 | 8.8 | 7.0 | 2.6 | 0.00 | 5.93 | 23.3 - 25.0 |
+| 0.35 cycles/day (reserve) | Forced air (DX) | 684 | 19.3 | 8.8 | 7.7 | 2.9 | 0.00 | 5.63 | 23.2 - 25.0 |
+| 1.0 cycle/day (day-ahead) | Liquid (cold plates) | 1907 | 24.6 | 8.8 | 8.1 | 7.7 | 0.00 | 5.94 | 24.0 - 25.0 |
+| 1.0 cycle/day (day-ahead) | Forced air (DX) | 1909 | 27.5 | 8.8 | 9.6 | 9.2 | 0.00 | 5.33 | 23.8 - 25.0 |
+| 2.0 cycles/day (two-cycle) | Liquid (cold plates) | 3800 | 38.0 | 8.8 | 11.0 | 18.3 | 0.00 | 5.95 | 24.5 - 25.0 |
+| 2.0 cycles/day (two-cycle) | Forced air (DX) | 3806 | 46.5 | 8.8 | 14.6 | 23.2 | 0.00 | 5.01 | 23.8 - 25.3 |
 
-- **Each metering boundary takes a distinct slice of round-trip efficiency.** At `1.0 cycle/day` (Liquid-Cooled),
-  electrochemical conversion at the DC cell terminals is **94.2 %** (falling to **91.8 %** at `2.0 cycles/day` due to
-  quadratic $`I^2 R`$ losses). Inverter switching and conduction losses bring AC PCS-terminal efficiency to **89.6 %**.
-  Stepping up through the 0.8/15 kV transformer (36.8 MWh/yr core loss plus copper loss) reduces efficiency to
-  **87.0 %** before any container auxiliaries are counted. Including HVAC, glycol pumps, and continuous BMS/EMS load
-  brings net metered AC-AC RTE at the 15 kV PCC to **84.1 %** (Liquid-Cooled) and **82.6 %** (Air-Cooled).
-- **Seasonal weather drives a 6.3 percentage-point monthly swing at 1.0 cycle/day.** Net PCC RTE drops to **79.4 % in
-  January** (when sub-zero ambient temperatures trigger winter PTC heating and elevate cold-cell internal resistance
-  $`R_{\mathrm{int}}`$), dips to **82.8 % in July** (when afternoon heatwaves up to +33.2 degC coincide with Carnot-derated
-  chiller COP), and peaks at **85.7 % in May and September** when mild ambient temperatures (`14.5 degC` mean) keep the
-  cells in their `20-24 degC` window with minimal active heating or compressor draw.
-- **Low-cycling reserve duty collapses net metered RTE to 73.8 %.** At `0.35 cycles/day` (`128 cycles/yr`), cell
-  self-heating $`I^2 R`$ is small, so the container loses heat through the walls in winter and relies on the PTC heater
-  (`24.5 MWh/yr`) to keep cells above the `12 degC` lithium-plating floor. Combined with 24/7 MV transformer core loss
-  (`36.8 MWh/yr`) and continuous BMS/controls draw (`28.0 MWh/yr`), standing parasitic losses total **`89.3 MWh/yr`
-  (`~90 MWh/yr`)**, dragging net PCC RTE down to **73.8 %** and violating a naive 85 % monthly RTE guarantee across the
-  year (11 to 12 months below 85 % unless auxiliary and transformer core losses are separated from the PCS guarantee,
-  as shown in [bess-ops-warranty](https://github.com/kwwaleszczynski-del/bess-ops-warranty)).
+| Check | Criterion | Result |
+|---|---|---|
+| Plant energy balance, 6 runs (bookkeeping) | residual < 1e-6 MWh | max 5.8e-13 MWh |
+| Implicit Euler vs matrix exponential, 10 days free-floating (liquid) | cell node error < 0.1 K | cell 0.004 K, enclosure 0.031 K |
+| Implicit Euler vs matrix exponential, 10 days free-floating (air) | cell node error < 0.1 K | cell 0.071 K, enclosure 0.532 K |
+| Sub-step 15 vs 5 min, 1.0 cyc/d (liquid) | < 0.05 pp RTE, < 1 % aux | 0.000 pp, 0.27 % |
+| Sub-step 15 vs 5 min, 1.0 cyc/d (air) | < 0.05 pp RTE, < 1 % aux | 0.000 pp, 0.01 % |
+| Idle heater at -30 degC vs closed form (liquid) | relative error < 1e-3 | 0.807 vs 0.807 kW |
+| Idle heater at -30 degC vs closed form (air) | relative error < 1e-3 | 0.307 vs 0.307 kW |
+
+| Implied by the inputs (not fitted) | Value |
+|---|---|
+| DC round-trip efficiency at 0.5 C / 0.2 C, 25 degC | 94.6 % / 97.5 % |
+| DC round-trip efficiency at 0.2 C, 12 degC | 96.4 % |
+| PCS efficiency at 10 / 25 / 50 / 100 % load | 97.1 % / 98.2 % / 98.5 % / 98.4 % |
+| Transformer efficiency at 25 / 50 / 100 % load | 99.6 % / 99.5 % / 99.2 % |
+| Chiller COP at 35 degC ambient: liquid (coolant 18 degC) / air (air 20 degC) | 3.10 / 2.91 |
+| Thermal time constant of the idle container (C_total / UA_env) | 117 h |
+<!-- results-tables:end -->
+
+- **Net RTE at the PCC is 92.4 % at 1 cycle/day and 89.8 % at 0.35 cycles/day** (liquid cooling). At 1 cycle/day
+  the 145.5 MWh/yr lost between PCC import and export split into PCS conversion 59.7 MWh (41 %), cell losses 39.0 MWh
+  (27 %), auxiliaries 24.6 MWh (17 %) and transformer 22.2 MWh (15 %).
+- **Fixed losses decide the low-cycling case.** Transformer no-load loss (13.8 MWh/yr) and the control base load
+  (8.8 MWh/yr) do not depend on throughput, so at 0.35 cycles/day they are 22.6 of the 69.4 MWh/yr lost, which is why
+  net RTE is 2.5 pp lower than at 1 cycle/day although the DC efficiency is higher (98.5 % against 97.9 %).
+- **Weather hardly moves the result.** Monthly net RTE at 1 cycle/day ranges from 92.2 % (July) to 92.5 % (February);
+  at 0.35 cycles/day from 89.0 % (July) to 90.4 % (February). Winter is the better season: the chiller runs at its
+  COP limit and pumps run less.
+- **No heating is needed in any of the six runs.** The insulated envelope (79 W/K) and the heat of cell losses,
+  pumps and the 1 kW base load keep the cells between 23.2 and 25.3 degC all year, also through the coldest hour of
+  2025 (-14.4 degC, 17 February). The idle container alone would settle 12.7 K above ambient, with a thermal time
+  constant of 117 h. Heating appears only with a much leakier envelope at low cycling (U = 3 W/(m2 K): 0.26 MWh/yr).
+  2025 was mild (February mean -1.1 degC); a 5 K colder year still needs no heating (sensitivity table).
 
 ![monthly RTE waterfall](docs/img/monthly_rte_waterfall.png)
 
-### 2. Liquid cold-plate cooling vs forced-air rooftop DX HVAC
+### 2. Liquid cold plates against forced air
 
-Comparing the two thermal architectures on the identical 5 MWh container and Polish weather record at `1.0 cycle/day`:
+On the same container and weather at 1 cycle/day, liquid cooling needs 24.6 MWh/yr of auxiliary energy against
+27.5 MWh/yr for forced air (2.96 MWh/yr or 10.8 % less), and net RTE differs by 0.2 pp (92.4 % against 92.2 %). The
+difference comes from the inputs, not from a factor: the lower cell-to-air conductance (2 against 12 kW/K) needs
+colder air for the same heat, which lowers the evaporating temperature and the COP (annual 5.33 against 5.94), and
+the fans draw more than the pump (2 against 1.5 kW). The gap grows at 2 cycles/day (46.5 against 38.0 MWh/yr).
 
-- **26.0 % lower annual auxiliary electricity (`18.5 MWh/yr` saved):** Liquid cooling consumes **52.7 MWh/yr** of
-  total auxiliary power (`28.0 MWh` BMS/controls, `10.8 MWh` winter PTC heating, `13.9 MWh` chiller and circulating
-  glycol pumps) against **71.2 MWh/yr** for the forced-air container (`28.0 MWh` BMS/controls, `17.8 MWh` PTC heating
-  through higher `195 W/K` wall/louver conductance, `25.4 MWh` rooftop DX compressor and blowers).
-- **3.2x tighter cell-to-cell temperature uniformity:** High heat-transfer conductance between the aluminum cold plates
-  and LFP modules (`18.5 kW/K` active vs `5.4 kW/K` for ducted air) keeps maximum module-to-module temperature spread
-  within **2.4 K** (Liquid-Cooled) versus **7.8 K** (Air-Cooled), preventing localized hot-spot accelerated calendar
-  and cycle fade.
+A two-node model cannot say anything about the cell-to-cell temperature spread, which is often the stronger argument
+for liquid cooling; the earlier version's spread figures are dropped.
 
 ![auxiliary power vs ambient temperature](docs/img/aux_vs_temperature.png)
 
-### 3. Winter cold snap (`-12.2 degC`) vs summer heatwave (`+33.2 degC`) dynamics
+### 3. Coldest and hottest week
 
-Quarter-hour resolution trajectories during a continental January cold snap (13-19 January) and a July heatwave
-(14-20 July) illustrate how thermal capacitance (`C_cell = 4.8 MJ/K`, `C_enc = 0.9 MJ/K`) filters rapid ambient swings
-while coupling directly into internal resistance:
+Quarter-hour trajectories for the week around the coldest and the hottest hour of 2025 at 1 cycle/day. The cell
+mass (29.2 MJ/K) filters the ambient swings completely; the control holds the cells at the 25 degC cooling set point.
 
-![winter and summer week trajectories](docs/img/winter_summer_week.png)
+![coldest and hottest week](docs/img/winter_summer_week.png)
 
-![annual loss breakdown by duty](docs/img/loss_breakdown_duty.png)
+![annual losses by component and duty](docs/img/loss_breakdown_duty.png)
 
-### 4. First-law verification and empirical auxiliary parameter recovery
+### 4. Which assumptions matter
 
-All six simulation runs satisfy exact first-law electrical and thermal conservation over the 8,760-hour horizon, and
-recover the four-parameter piecewise-linear auxiliary model used in operational SCADA analytics:
+Each input set to a low and a high value with everything else at base (liquid cooling). Over these ranges the
+electrical inputs (cell resistance and hysteresis, PCS and transformer no-load losses, base load) move net RTE by
+1.0 to 4.4 pp; the thermal inputs (envelope, set points, COP, a 5 K shift of the whole year) by less than 0.9 pp.
+The heating set point has no effect because the cells never get near it.
 
-| Verification check / parameter | Ground truth / criterion | Simulated / recovered value |
+<!-- sensitivity-table:start -->
+| Input (low / base / high) | 0.35 cyc/d: net PCC RTE low / high | 1.0 cyc/d: net PCC RTE low / high |
 |---|---|---|
-| Electrical balance `E_in,pcc - E_out,pcc - dE_stored == sum(losses)` | `< 1e-6 MWh` | max residual `5.68e-13 MWh` |
-| Two-node thermal balance `C_cell dT_cell + C_enc dT_enc == sum(Q)` | `< 1e-6 MJ` | max residual `1.18e-9 MJ` |
-| Arrhenius resistance ratio `R_int(5 degC) / R_int(25 degC)` | `2.0000` | `2.0000` |
-| Liquid chiller COP at `20 degC` / `35 degC` | `3.40` / `2.10` | `3.40` / `2.10` |
-| Piecewise-linear recovery: base load `b_0` | `5.00 kW` | `5.001 kW` |
-| Piecewise-linear recovery: heating slope `h` below `T_h` | `0.85 kW/K` below `12.0 degC` | `0.850 kW/K` below `12.0 degC` |
-| Piecewise-linear recovery: cooling slope `c` above `T_c` | `0.62 kW/K` above `18.0 degC` | `0.620 kW/K` above `18.0 degC` |
-| Piecewise-linear recovery: load coefficient `k` (`R^2`) | `1.40 kW/MW` | `1.399 kW/MW` (`R^2 = 0.9999`) |
+| Cell DC resistance at 25 degC [mOhm] (0.3 / 0.5 / 1) | 90.2 % / 89.0 % | 93.0 % / 90.8 % |
+| PCS no-load loss [kW] (2.5 / 5 / 10) | 90.9 % / 87.8 % | 93.0 % / 91.2 % |
+| BMS/controls base load [kW] (0.5 / 1 / 3) | 90.8 % / 86.4 % | 92.7 % / 91.1 % |
+| Cell voltage hysteresis [mV] (0 / 10 / 20) | 90.5 % / 89.2 % | 93.0 % / 91.7 % |
+| Transformer no-load loss [kW] (0.8 / 1.575 / 3.2) | 90.8 % / 88.0 % | 92.7 % / 91.7 % |
+| Circulation power [kW] (0.75 / 1.5 / 3) | 90.4 % / 88.7 % | 92.6 % / 91.9 % |
+| Cooling set point [degC] (22 / 25 / 30) | 89.6 % / 90.2 % | 92.2 % / 92.7 % |
+| Envelope U-value [W/m2K] (0.5 / 1 / 3) | 89.2 % / 90.1 % | 92.3 % / 92.5 % |
+| Ambient temperature shift [K] (-5 / 0 / 5) | 90.1 % / 89.5 % | 92.4 % / 92.3 % |
+| Chiller Carnot fraction [-] (0.25 / 0.38 / 0.5) | 89.8 % / 89.8 % | 92.3 % / 92.4 % |
+| Heating set point [degC] (5 / 12 / 20) | 89.8 % / 89.8 % | 92.4 % / 92.4 % |
+<!-- sensitivity-table:end -->
+
+![sensitivity tornado](docs/img/sensitivity_tornado.png)
+
+### 5. Context
+
+The modelled net RTE is higher than fleet averages reported from operation, for example 82 % average monthly RTE of
+the US utility-scale battery fleet in 2019 (EIA, *Utility-scale batteries and pumped storage return about 80 % of the
+electricity they store*, 12 February 2021; to be verified for current fleets). The model leaves out much of what lowers
+metered RTE in practice: idle days and partial-power operation (frequency response), SoC recalibration cycles,
+balancing, PCS skid cooling and standby, an auxiliary transformer, cabling, reactive power, higher C-rates and cell
+ageing. Read the numbers as the efficiency of a clean, new container on a regular schedule.
+
+## Inputs
+
+<!-- parameter-table:start -->
+| Input | Value | Basis |
+|---|---|---|
+| Rated power / energy | 2.5 MW / 5 MWh | generic 20-ft LFP container |
+| Pack layout | 416s x 12p, 314 Ah LFP cells | assumption (common 1,331 V nominal string) |
+| Effective cell DC resistance at 25 degC | 0.5 mOhm | assumption: ohmic + polarisation; implied DC RTE in the checks table |
+| Resistance vs temperature | doubles from 25 to 5 degC | Arrhenius, E_a/R = 2874 K (assumption) |
+| Cell voltage hysteresis (half gap) | 10 mV | assumption, LFP charge/discharge OCV gap; to be verified per cell |
+| Entropic coefficient | order 0.1 mV/K, sign changes with SoC | assumed shape, order of published LFP values; to be verified |
+| Cell thermal mass | 29.2 MJ/K | 180 Wh/kg, c_p 1050 J/(kg K) (assumption) |
+| Enclosure node thermal mass | 4 MJ/K | racks, coolant or air, steel shell (assumption) |
+| Envelope UA | 79 W/K | 78.7 m2 (20-ft HC) x U 1 W/(m2 K) (assumption) |
+| Roof solar gain | sol-air on the roof only | absorptance 0.35, h_out 20 W/(m2 K) (assumption) |
+| Cell temperature band | 12 to 25 degC | heat below, cool above (assumption) |
+| Heater | 15 kW, efficiency 1 | resistive, inside the envelope |
+| BMS / controls base load | 1 kW, 24/7 | assumption; dissipated inside the container |
+| Cell-to-coolant / cell-to-air UA | 12 / 2 kW/K | assumption (~2.4 / ~0.4 W/K per cell) |
+| Evaporator approach (liquid / air) | 6 / 10 K | assumption |
+| Minimum supply temperature (liquid / air) | 15 / 12 degC | assumption |
+| Cooling capacity (liquid / air) | 60 / 50 kW | assumption |
+| Pump / fan power while running (liquid / air) | 1.5 / 2 kW | assumption; runs while cycling or heating/cooling |
+| Chiller COP model | 0.38 x Carnot, condensing at T_amb + 12 K, max 6 | assumption; no free-cooling economiser |
+| PCS loss | 5 kW + 0.008 |P| + 2.4e-06 P^2 (kW) | assumption, typical central-inverter curve; sleep when idle |
+| MV transformer 2.5 MVA losses | no-load 1.575 kW, load 18.5 kW | EU Ecodesign Tier 2 maximum (Reg. (EU) 548/2014, Annex I, Table I.1); to be verified |
+<!-- parameter-table:end -->
+
+Values marked as assumptions are engineering estimates for a generic container. The transformer losses are the
+maximum values of Table I.1 in Commission Regulation (EU) No 548/2014 (Tier 2, from 1 July 2021) for a 2,500 kVA
+liquid-immersed transformer; whether the regulation applies to a given battery transformer, and the current
+consolidated text, are to be verified.
 
 ## Method
 
-### 1. Electro-thermal LFP cell model
+### 1. Cell heat
 
-For pack chemical power $`P_{\mathrm{chem}}`$ (`+` discharge, `-` charge) and open-circuit pack voltage
-$`U_{\mathrm{ocv}}(\mathrm{SoC})`$, the pack current is $`I = P_{\mathrm{chem}} / U_{\mathrm{ocv}}(\mathrm{SoC})`$.
-Total internal heat generation $`Q_{\mathrm{cell}}`$ combines irreversible Joule dissipation and reversible entropic
-heat across the LFP phase-staging plateaus:
-
-```math
-Q_{\mathrm{cell}} = Q_{\mathrm{Joule}} + Q_{\mathrm{rev}}
-= I^2 R_{\mathrm{int}}(T_{\mathrm{cell}}, \mathrm{SoC})
-+ I \, T_{\mathrm{cell}} \, \frac{\partial U_{\mathrm{ocv}}}{\partial T}(\mathrm{SoC})
-```
-
-where the pack internal resistance follows an Arrhenius temperature law above a quadratic/cubic SoC bowl:
+For chemical power $`P_{\mathrm{chem}}`$ (positive on discharge) the pack current is
+$`I = P_{\mathrm{chem}} / U_{\mathrm{ocv}}(\mathrm{SoC})`$. With $`n_s`$ cells in series, hysteresis
+$`U_h`$ per cell and entropic coefficient $`\partial U_{\mathrm{ocv}} / \partial T`$ per cell (Bernardi form):
 
 ```math
-R_{\mathrm{int}}(T_{\mathrm{cell}}, \mathrm{SoC})
-= R_{25}(\mathrm{SoC}) \, \exp\!\left[\frac{E_a}{R}\left(\frac{1}{T_{\mathrm{cell}}} - \frac{1}{298.15}\right)\right]
+Q_{\mathrm{irr}} = I^2 R_{\mathrm{int}}(T_{\mathrm{cell}}, \mathrm{SoC}) + |I|\, n_s U_h,
+\qquad
+Q_{\mathrm{rev}} = -I\, T_{\mathrm{cell}}\, n_s \frac{\partial U_{\mathrm{ocv}}}{\partial T}(\mathrm{SoC})
 ```
 
-With activation temperature $`E_a / R = 2874.15\;\mathrm{K}`$, $`R_{\mathrm{int}}`$ doubles between `25 degC` (`298.15 K`)
-and `5 degC` (`278.15 K`).
+```math
+R_{\mathrm{int}} = R_{25}\, f(\mathrm{SoC}) \exp\left[\frac{E_a}{R}\left(\frac{1}{T_{\mathrm{cell}}} - \frac{1}{298.15\,\mathrm{K}}\right)\right] \frac{n_s}{n_p},
+\qquad f(0.5) = 1
+```
 
-### 2. Two-node container thermal state-space
+The reversible heat changes the cells' temperature but not the electrical energy; over a charge-neutral day it
+nearly cancels.
 
-The LFP racks (`C_cell = 4.8 MJ/K`) and the coolant/enclosure volume (`C_enc = 0.9 MJ/K`) evolve as a coupled two-node
-system integrated implicitly at 15-minute sub-steps:
+### 2. Two-node thermal model
 
 ```math
 \begin{aligned}
-C_{\mathrm{cell}} \frac{\mathrm{d}T_{\mathrm{cell}}}{\mathrm{d}t} &= Q_{\mathrm{cell}} - UA_{\mathrm{int}}\,(T_{\mathrm{cell}} - T_{\mathrm{enc}}) \\[1ex]
-C_{\mathrm{enc}} \frac{\mathrm{d}T_{\mathrm{enc}}}{\mathrm{d}t} &= UA_{\mathrm{int}}\,(T_{\mathrm{cell}} - T_{\mathrm{enc}}) + \alpha\,G_{\mathrm{poa}}\,A_{\mathrm{roof}} - UA_{\mathrm{wall}}\,(T_{\mathrm{enc}} - T_{\mathrm{amb}}) - Q_{\mathrm{hvac}}
+C_{\mathrm{cell}} \frac{\mathrm{d}T_{\mathrm{cell}}}{\mathrm{d}t} &= Q_{\mathrm{irr}} + Q_{\mathrm{rev}} - UA_{\mathrm{int}}\,(T_{\mathrm{cell}} - T_{\mathrm{enc}}) \\
+C_{\mathrm{enc}} \frac{\mathrm{d}T_{\mathrm{enc}}}{\mathrm{d}t} &= UA_{\mathrm{int}}\,(T_{\mathrm{cell}} - T_{\mathrm{enc}}) - UA_{\mathrm{env}}\,(T_{\mathrm{enc}} - T_{\mathrm{amb}}) + Q_{\mathrm{sol}} + P_{\mathrm{base}} + P_{\mathrm{circ}} + Q_{\mathrm{heat}} - Q_{\mathrm{cool}}
 \end{aligned}
 ```
 
-where $`Q_{\mathrm{hvac}} = Q_{\mathrm{cool,th}} - Q_{\mathrm{heat,th}}`$ is the net thermal power extracted by the
-chiller or injected by the winter PTC heater. Summing both nodes yields the exact thermal conservation law over any
-interval:
+with the roof sol-air gain $`Q_{\mathrm{sol}} = UA_{\mathrm{roof}}\, \alpha\, G / h_{\mathrm{out}}`$ ($`G`$ = ERA5
+global horizontal irradiance). The system is integrated with implicit Euler at 15-minute sub-steps. When a
+free-floating step would take $`T_{\mathrm{cell}}`$ below the heating or above the cooling set point, the heater or
+chiller adds or removes exactly the heat that returns it to the band edge, limited by its capacity and by the
+coolant/air supply temperature limits. Pumps or fans run while the battery cycles or the HVAC is active; their power
+and the base load end up as heat inside the container.
+
+### 3. Chiller and heater
 
 ```math
-C_{\mathrm{cell}}\,\Delta T_{\mathrm{cell}} + C_{\mathrm{enc}}\,\Delta T_{\mathrm{enc}}
-= \int \left(Q_{\mathrm{cell}} + Q_{\mathrm{solar}} - Q_{\mathrm{wall}} - Q_{\mathrm{hvac}}\right)\mathrm{d}t
+\mathrm{COP} = \min\left(\mathrm{COP}_{\max},\; \eta_C \frac{T_{\mathrm{evap}}}{T_{\mathrm{cond}} - T_{\mathrm{evap}}}\right),
+\qquad T_{\mathrm{evap}} = T_{\mathrm{enc}} - \Delta T_{\mathrm{evap}},
+\qquad T_{\mathrm{cond}} = T_{\mathrm{amb}} + \Delta T_{\mathrm{cond}}
 ```
 
-### 3. PCS, MV transformer, and auxiliary power chain
+$`P_{\mathrm{chiller}} = Q_{\mathrm{cool}} / \mathrm{COP}`$ and $`P_{\mathrm{heater}} = Q_{\mathrm{heat}} / \eta_h`$,
+with the same heat flows that enter the thermal model.
 
-At every step, active power is tracked from stored chemical energy to the 15 kV point of common coupling:
+### 4. Power chain and RTE
 
 ```math
 \begin{aligned}
-P_{\mathrm{dc,term}} &= P_{\mathrm{chem}} - Q_{\mathrm{Joule}} - Q_{\mathrm{rev}} \\
-P_{\mathrm{loss,pcs}} &= p_0 + k_1\,|P_{\mathrm{dc,term}}| + k_2\,P_{\mathrm{dc,term}}^2 \\
-P_{\mathrm{pcs,ac}} &= P_{\mathrm{dc,term}} - P_{\mathrm{loss,pcs}} \\
-P_{\mathrm{loss,trafo}} &= P_{\mathrm{fe}} + P_{\mathrm{cu,rated}}\left(\frac{P_{\mathrm{pcs,ac}}}{S_{\mathrm{rated}}}\right)^2 \\
-P_{\mathrm{aux}} &= P_{\mathrm{bms}} + \frac{Q_{\mathrm{heat,th}}}{\eta_{\mathrm{ptc}}} + \frac{Q_{\mathrm{cool,th}}}{\mathrm{COP}(T_{\mathrm{amb}})} + P_{\mathrm{pump}} \\
-P_{\mathrm{pcc}} &= P_{\mathrm{pcs,ac}} - P_{\mathrm{loss,trafo}} - P_{\mathrm{aux}}
+P_{\mathrm{dc}} &= P_{\mathrm{chem}} - Q_{\mathrm{irr}} \\
+P_{\mathrm{ac}} &= P_{\mathrm{dc}} - \left(p_0 + k_1 |P_{\mathrm{dc}}| + k_2 P_{\mathrm{dc}}^2\right) \\
+P_{\mathrm{mv}} &= P_{\mathrm{ac}} - P_0 - P_k \left(P_{\mathrm{ac}} / S_r\right)^2 \\
+P_{\mathrm{aux}} &= P_{\mathrm{base}} + P_{\mathrm{circ}} + P_{\mathrm{heater}} + P_{\mathrm{chiller}} \\
+P_{\mathrm{pcc}} &= P_{\mathrm{mv}} - P_{\mathrm{aux}}
 \end{aligned}
 ```
 
-Integrating $`P_{\mathrm{in,pcc}} = \max(-P_{\mathrm{pcc}}, 0)`$ and $`P_{\mathrm{out,pcc}} = \max(P_{\mathrm{pcc}}, 0)`$
-over 8,760 hours yields the exact first-law electrical energy balance:
+Import and export are summed per sub-step at each boundary (DC, PCS AC, MV without auxiliaries, LV side with
+auxiliaries, PCC); RTE is export over import. Every day is charge-neutral, so no SoC correction is needed.
+
+### 5. Plant energy balance
+
+Over the plant boundary, the net import at the PCC has to equal the change of stored chemical and entropic energy,
+the change of sensible heat in both nodes, the heat leaving through the envelope (less the solar gain), the heat
+rejected by the chiller condenser, and the PCS and transformer losses:
 
 ```math
-E_{\mathrm{in,pcc}} - E_{\mathrm{out,pcc}} - \Delta E_{\mathrm{stored}}
-= E_{\mathrm{Joule}} + E_{\mathrm{entropic}} + E_{\mathrm{pcs}} + E_{\mathrm{trafo,fe}} + E_{\mathrm{trafo,cu}} + E_{\mathrm{aux}}
+E_{\mathrm{in,pcc}} - E_{\mathrm{out,pcc}} = \Delta E_{\mathrm{chem}} - \sum Q_{\mathrm{rev}} \Delta t + \Delta H_{\mathrm{sens}}
++ \sum (Q_{\mathrm{env}} - Q_{\mathrm{sol}}) \Delta t + \sum (Q_{\mathrm{cool}} + P_{\mathrm{chiller}}) \Delta t
++ \sum (P_{\mathrm{heater}} - Q_{\mathrm{heat}}) \Delta t + E_{\mathrm{pcs}} + E_{\mathrm{trafo}}
 ```
+
+Joule heat, heater heat, pump and base-load power do not appear on the right: they have to reappear as stored heat
+or as heat leaving the container. The check is bookkeeping, not validation; it fails whenever an electrical term and
+the heat it produces are computed inconsistently.
+
+### 6. Other checks
+
+- **Solver against the exact solution**: a free-floating, idle container from unequal start temperatures, compared
+  over 10 days with the matrix-exponential solution of the linear two-node system.
+- **Time-step convergence**: the whole year at 15-minute and 5-minute sub-steps.
+- **Closed-form heater case**: an idle container at a constant -30 degC must need
+  $`P_{\mathrm{heater}} = (UA_{\mathrm{env}} (T_{\mathrm{heat}} - T_{\mathrm{amb}}) - P_{\mathrm{base}} - P_{\mathrm{circ}}) / \eta_h`$.
+- **Auxiliary surrogate**: the four-parameter model used in
+  [bess-ops-warranty](https://github.com/kwwaleszczynski-del/bess-ops-warranty),
+  $`P_{\mathrm{aux}} = b_0 + h \max(T_h - T, 0) + c \max(T - T_c, 0) + k |P_{\mathrm{pcs}}|`$, fitted to this
+  model's output at 1 cycle/day reaches R2 0.69 on hourly values (liquid and air) and 0.97 / 0.94 on daily means: it
+  captures daily totals, not the hour-to-hour switching of pumps and chiller. With the same schedule every day, the
+  base load and the load coefficient cannot be separated on daily data, so only the fit quality is reported. A
+  separate test checks that the estimator recovers known parameters from synthetic data; that tests the fitting code
+  only.
+
+## Data
+
+| Source | Content | Licence |
+|---|---|---|
+| [ERA5](https://cds.climate.copernicus.eu/) via the [Open-Meteo](https://open-meteo.com/) archive API | hourly 2 m temperature and global horizontal irradiance, 52.2 N 21.0 E, 2025, stored in CET (UTC+1) in `data/era5_central_poland_2025.csv` | CC BY 4.0 |
+
+The download is one Open-Meteo request (2 variables, one year); `python -m bess_thermal fetch` repeats it. Contains
+modified Copernicus Climate Change Service information (2025). Hersbach, H. et al. (2020), The ERA5 global
+reanalysis, *Q. J. R. Meteorol. Soc.* 146, 1999-2049.
+
+## Limitations
+
+- Generic inputs, no product datasheets and no measured data; results show how the losses combine, not the
+  performance of a specific container.
+- Two nodes: no cell-to-cell temperature spread, no hot spots, no separate PCS or transformer thermal model.
+- One mild weather year at one ERA5 grid point; sol-air gain on the roof only.
+- Idealised control (exact hold at the band edge, no hysteresis or compressor cycling) and no free-cooling
+  economiser; the COP cap stands in for it.
+- Fixed daily schedules on the chemical side, no idle days, no ageing, auxiliaries supplied at MV without an
+  auxiliary transformer, transformer losses at unity power factor.
 
 ## Run it
 
 ```bash
 python -m venv .venv
 .venv/Scripts/pip install -e ".[dev]"          # .venv/bin/pip on Linux/macOS
-pytest -q                                      # 21 tests, no network
-python -m bess_thermal run                     # runs 8,760-hour study, writes results/, docs/img/*.png, docs/data.js
-python -m bess_thermal verify                  # prints JSON verification of first-law balances and parameter recovery
+pytest -q                                      # offline; includes a full rerun compared with results/ and README
+python -m bess_thermal run                     # ~1.5 min: results/, docs/img/*.png, docs/data.js, README tables
+python -m bess_thermal verify                  # same run, prints the checks as JSON
+python -m bess_thermal fetch                   # re-download the ERA5 year (network)
 ```
 
 ```
+data/era5_central_poland_2025.csv   hourly ERA5 weather (CET)
 src/bess_thermal/
-  config.py        2.5 MW / 5.0 MWh LFP container, cooling systems, PCS/MV transformer, and duty specs
-  weather.py       deterministic 8,760-hour Central Poland weather profile (52.2 N, 21.0 E)
-  duties.py        hourly chemical dispatch schedules (0.35, 1.0, and 2.0 cycles/day)
-  physics.py       Arrhenius R_int(T, SoC), entropic heat, chiller COP(T_amb), PCS and transformer loss laws
-  simulation.py    coupled 2-node electro-thermal solver, metering boundary RTE waterfall, conservation checks
-  verification.py  first-law verification and breakpoint grid-search + NNLS auxiliary model recovery
-  plots.py         matplotlib figures in docs/img/
-  pipeline.py      end-to-end study runner and docs/data.js generator
+  config.py        container, cooling, chiller, PCS/transformer and duty inputs
+  weather.py       ERA5 download (Open-Meteo) and loader
+  duties.py        hourly charge/discharge schedules (0.35, 1 and 2 cycles/day)
+  physics.py       resistance, OCV, entropic heat, chiller COP, PCS and transformer losses
+  simulation.py    two-node solver with HVAC control, power chain, RTE, plant energy balance
+  verification.py  checks and the auxiliary surrogate
+  sensitivity.py   one-at-a-time sensitivity
+  plots.py         figures in docs/img/
+  pipeline.py      end-to-end run, docs/data.js, generated README tables
   cli.py           command-line interface
 tests/
   test_bess_thermal.py
