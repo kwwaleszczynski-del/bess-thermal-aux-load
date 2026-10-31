@@ -27,7 +27,7 @@ no-load loss runs for fewer hours).
 
 | Check | Criterion | Result |
 |---|---|---|
-| Plant energy balance, 8 runs (bookkeeping) | residual < 1e-6 MWh | max 5.8e-13 MWh |
+| Plant energy balance, 8 runs (bookkeeping) | residual < 1e-6 MWh | max < 1e-9 MWh |
 | Implicit Euler vs matrix exponential, 10 days free-floating (liquid) | cell node error < 0.1 K | cell 0.004 K, enclosure 0.031 K |
 | Implicit Euler vs matrix exponential, 10 days free-floating (air) | cell node error < 0.1 K | cell 0.071 K, enclosure 0.532 K |
 | Sub-step 15 vs 5 min, 1.0 cyc/d (liquid) | < 0.05 pp RTE, < 1 % aux | 0.000 pp, 0.27 % |

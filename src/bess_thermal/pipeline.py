@@ -89,12 +89,15 @@ def build_readme_tables(summaries: dict[tuple[str, str], dict], verification: di
     conv = v["timestep_convergence"]
     idle = v["idle_heater_steady_state"]
     ir = v["implied_ratings"]
+    # the residual is round-off and differs between platforms, so the table states a bound, not the value
+    res = v["plant_energy_balance"]["max_residual_mwh"]
+    res_txt = "< 1e-9" if res < 1e-9 else f"{res:.1e}"
     lines += [
         "",
         "| Check | Criterion | Result |",
         "|---|---|---|",
         f"| Plant energy balance, {len(v['plant_energy_balance']['runs'])} runs (bookkeeping) | residual < 1e-6 MWh | "
-        f"max {v['plant_energy_balance']['max_residual_mwh']:.1e} MWh |",
+        f"max {res_txt} MWh |",
     ]
     for r in integ:
         lines.append(
