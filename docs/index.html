@@ -278,12 +278,14 @@ function renderAuxAndLossPlots() {
     ["e_bms_mwh", "Base load", "--s2"],
   ];
   const trL = comps.map(([k, label, col]) => ({
-    type: "bar", x: duties.map(d => DUTY[d]), y: duties.map(d => D.runs[`${d}__${st.cooling}`].summary[k]),
+    // on phones the longest duty name breaks onto two lines; angled, it ran past the right edge
+    type: "bar", x: duties.map(d => narrow() ? DUTY[d].replace(" at ", "<br>at ") : DUTY[d]),
+    y: duties.map(d => D.runs[`${d}__${st.cooling}`].summary[k]),
     name: label, marker: {color: css(col)}
   }));
   Plotly.react("plot-loss-duty", trL, layoutBase({
     barmode: "stack",
-    xaxis: axis({type: "category"}),
+    xaxis: axis(Object.assign({type: "category"}, narrow() ? {tickangle: 0} : {})),
     yaxis: axis({title: {text: `Annual losses, ${st.cooling} [MWh/yr]`, font: {size: 12}}})
   }), cfg);
 }
