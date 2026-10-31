@@ -43,9 +43,11 @@ def main(argv: list[str] | None = None) -> int:
     else:
         s_da = payload["runs"]["da_100__liquid"]["summary"]
         s_res = payload["runs"]["reserve_035__liquid"]["summary"]
+        s_rated = payload["runs"]["rated_100__liquid"]["summary"]
         print(
             f"Net PCC RTE, liquid: 1.0 cyc/d {s_da['rte_pcc_net'] * 100:.1f} % "
             f"(months {s_da['rte_pcc_month_min'] * 100:.1f}-{s_da['rte_pcc_month_max'] * 100:.1f} %), "
-            f"0.35 cyc/d {s_res['rte_pcc_net'] * 100:.1f} %."
+            f"0.35 cyc/d {s_res['rte_pcc_net'] * 100:.1f} %, "
+            f"1.0 cyc/d at {s_rated['max_c_rate']:g} C {s_rated['rte_pcc_net'] * 100:.1f} %."
         )
     return 0

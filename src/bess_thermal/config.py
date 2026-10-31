@@ -179,4 +179,10 @@ DUTY_SPECS: dict[str, DutySpec] = {
         short_label="2.0 cycles/day (two-cycle)",
         cycles_per_day=2.0,
     ),
+    "rated_100": DutySpec(
+        code="rated_100",
+        label="Full-power arbitrage at the rated 0.5 C (1.0 cycle/day)",
+        short_label="1.0 cycle/day at 0.5 C (rated power)",
+        cycles_per_day=1.0,
+    ),
 }

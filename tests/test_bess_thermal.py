@@ -207,16 +207,35 @@ def test_cell_temperature_stays_in_control_band(runs):
     for (d, cool), res in runs.items():
         s = res["summary"]
         assert s["t_cell_min_c"] >= c.t_heat_set_c - 1e-6, (d, cool)
+        if d == "rated_100":
+            continue  # cell heat at 0.5 C exceeds what the cooling can remove (rated C-rate test below)
         tol = 1e-6 if cool == "liquid" else 1.0
         assert s["t_cell_max_c"] <= c.t_cool_set_c + tol, (d, cool)
 
 
 def test_more_cycling_more_cell_loss_lower_dc_rte(runs):
+    duties = ("reserve_035", "da_100", "heavy_200")
     for cool in COOLING_SYSTEMS:
-        loss = [runs[(d, cool)]["summary"]["e_cell_loss_mwh"] for d in DUTY_SPECS]
-        dc = [runs[(d, cool)]["summary"]["rte_dc"] for d in DUTY_SPECS]
+        loss = [runs[(d, cool)]["summary"]["e_cell_loss_mwh"] for d in duties]
+        dc = [runs[(d, cool)]["summary"]["rte_dc"] for d in duties]
         assert loss[0] < loss[1] < loss[2]
         assert dc[0] > dc[1] > dc[2]
+
+
+def test_rated_c_rate_costs_efficiency_at_same_throughput(runs):
+    """1 cycle/day at the rated 0.5 C against the same daily throughput at a lower peak C-rate."""
+    c = ContainerSpec()
+    for cool, cooling in COOLING_SYSTEMS.items():
+        da, rated = runs[("da_100", cool)]["summary"], runs[("rated_100", cool)]["summary"]
+        assert rated["cycles_per_day"] == da["cycles_per_day"]
+        assert rated["max_c_rate"] == pytest.approx(c.rated_power_kw / c.rated_energy_kwh)
+        assert da["max_c_rate"] < rated["max_c_rate"]
+        assert rated["e_cell_loss_mwh"] > da["e_cell_loss_mwh"] and rated["rte_dc"] < da["rte_dc"]
+        assert rated["e_trafo_pk_mwh"] > da["e_trafo_pk_mwh"]
+        assert rated["rte_pcc_net"] < da["rte_pcc_net"]
+        # Cell heat at 0.5 C above the cooling capacity: the cooling set point cannot be held
+        if cell_heat_generation_kw(c.rated_power_kw, c.t_cool_set_c, 0.5, c)[0] > cooling.cooling_capacity_kw:
+            assert rated["t_cell_max_c"] > c.t_cool_set_c, cool
 
 
 def test_air_cooling_needs_more_aux_than_liquid(runs):

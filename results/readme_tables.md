@@ -1,3 +1,8 @@
+**Headline (liquid cooling, ERA5 2025):** net RTE at the PCC is **92.4 %** at 1 cycle/day with a peak of 0.18 C and
+**89.8 %** at 0.35 cycles/day (peak 0.09 C). Cycling the same 5 MWh a day at the rated 0.5 C (2 h charge, 2 h
+discharge) gives **88.2 %**, 4.2 pp less: cells +62.5 MWh/yr, transformer +18.7, auxiliaries +5.1 and PCS -1.3 (its
+no-load loss runs for fewer hours).
+
 | Duty | Cooling | DC | PCS AC | MV, excl. aux | LV net | **PCC net** | PCC net, lowest / highest month |
 |---|---|---|---|---|---|---|---|
 | 0.35 cycles/day (reserve) | Liquid (cold plates) | 98.5 % | 94.6 % | 92.4 % | 92.0 % | **89.8 %** | 89.0 % (Jul) / 90.4 % (Feb) |
@@ -6,6 +11,8 @@
 | 1.0 cycle/day (day-ahead) | Forced air (DX) | 97.9 % | 94.7 % | 93.6 % | 93.3 % | **92.2 %** | 92.0 % (Jul) / 92.3 % (Feb) |
 | 2.0 cycles/day (two-cycle) | Liquid (cold plates) | 97.3 % | 94.4 % | 93.4 % | 93.4 % | **92.5 %** | 92.4 % (Jul) / 92.5 % (Feb) |
 | 2.0 cycles/day (two-cycle) | Forced air (DX) | 97.3 % | 94.4 % | 93.4 % | 93.2 % | **92.3 %** | 92.1 % (Jul) / 92.4 % (Feb) |
+| 1.0 cycle/day at 0.5 C (rated power) | Liquid (cold plates) | 94.6 % | 91.6 % | 89.6 % | 90.2 % | **88.2 %** | 88.1 % (Jul) / 88.3 % (Jan) |
+| 1.0 cycle/day at 0.5 C (rated power) | Forced air (DX) | 94.7 % | 91.7 % | 89.7 % | 89.9 % | **87.9 %** | 87.5 % (Jul) / 88.2 % (Feb) |
 
 | Duty | Cooling | PCC import [MWh/yr] | Aux total [MWh/yr] | Base load | Pump / fans | Chiller | Heater | Chiller COP (annual) | Cell temp. min-max [degC] |
 |---|---|---|---|---|---|---|---|---|---|
@@ -15,10 +22,12 @@
 | 1.0 cycle/day (day-ahead) | Forced air (DX) | 1909 | 27.5 | 8.8 | 9.6 | 9.2 | 0.00 | 5.33 | 23.8 - 25.0 |
 | 2.0 cycles/day (two-cycle) | Liquid (cold plates) | 3800 | 38.0 | 8.8 | 11.0 | 18.3 | 0.00 | 5.95 | 24.5 - 25.0 |
 | 2.0 cycles/day (two-cycle) | Forced air (DX) | 3806 | 46.5 | 8.8 | 14.6 | 23.2 | 0.00 | 5.01 | 23.8 - 25.3 |
+| 1.0 cycle/day at 0.5 C (rated power) | Liquid (cold plates) | 1954 | 29.6 | 8.8 | 3.1 | 17.7 | 0.00 | 5.87 | 22.2 - 29.7 |
+| 1.0 cycle/day at 0.5 C (rated power) | Forced air (DX) | 1961 | 38.5 | 8.8 | 5.9 | 23.9 | 0.00 | 4.49 | 21.6 - 34.0 |
 
 | Check | Criterion | Result |
 |---|---|---|
-| Plant energy balance, 6 runs (bookkeeping) | residual < 1e-6 MWh | max 5.8e-13 MWh |
+| Plant energy balance, 8 runs (bookkeeping) | residual < 1e-6 MWh | max 5.8e-13 MWh |
 | Implicit Euler vs matrix exponential, 10 days free-floating (liquid) | cell node error < 0.1 K | cell 0.004 K, enclosure 0.031 K |
 | Implicit Euler vs matrix exponential, 10 days free-floating (air) | cell node error < 0.1 K | cell 0.071 K, enclosure 0.532 K |
 | Sub-step 15 vs 5 min, 1.0 cyc/d (liquid) | < 0.05 pp RTE, < 1 % aux | 0.000 pp, 0.27 % |

@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+import textwrap
 from pathlib import Path
 
 import numpy as np
@@ -92,7 +93,8 @@ def build_readme_tables(summaries: dict[tuple[str, str], dict], verification: di
         "",
         "| Check | Criterion | Result |",
         "|---|---|---|",
-        f"| Plant energy balance, 6 runs (bookkeeping) | residual < 1e-6 MWh | max {v['plant_energy_balance']['max_residual_mwh']:.1e} MWh |",
+        f"| Plant energy balance, {len(v['plant_energy_balance']['runs'])} runs (bookkeeping) | residual < 1e-6 MWh | "
+        f"max {v['plant_energy_balance']['max_residual_mwh']:.1e} MWh |",
     ]
     for r in integ:
         lines.append(
@@ -121,6 +123,26 @@ def build_readme_tables(summaries: dict[tuple[str, str], dict], verification: di
         f"| Thermal time constant of the idle container (C_total / UA_env) | {ir['envelope_time_constant_h']:.0f} h |",
     ]
     return "\n".join(lines)
+
+
+def build_headline(summaries: dict[tuple[str, str], dict]) -> str:
+    """First-screen headline: net PCC RTE (liquid) with the peak C-rate of each duty, and what 0.5 C costs."""
+    res, da, rated = (summaries[(d, "liquid")] for d in ("reserve_035", "da_100", "rated_100"))
+    d_pcs = rated["e_pcs_mwh"] - da["e_pcs_mwh"]
+    deltas = (
+        f"cells {rated['e_cell_loss_mwh'] - da['e_cell_loss_mwh']:+.1f} MWh/yr, transformer "
+        f"{rated['e_trafo_p0_mwh'] + rated['e_trafo_pk_mwh'] - da['e_trafo_p0_mwh'] - da['e_trafo_pk_mwh']:+.1f}, "
+        f"auxiliaries {rated['e_aux_mwh'] - da['e_aux_mwh']:+.1f} and PCS {d_pcs:+.1f}"
+        + (" (its no-load loss runs for fewer hours)" if d_pcs < 0.0 else "")
+    )
+    text = (
+        f"**Headline (liquid cooling, ERA5 2025):** net RTE at the PCC is **{_pct(da['rte_pcc_net'])}** at 1 cycle/day "
+        f"with a peak of {da['max_c_rate']:g} C and **{_pct(res['rte_pcc_net'])}** at 0.35 cycles/day (peak "
+        f"{res['max_c_rate']:g} C). Cycling the same 5 MWh a day at the rated {rated['max_c_rate']:g} C (2 h charge, "
+        f"2 h discharge) gives **{_pct(rated['rte_pcc_net'])}**, "
+        f"{100.0 * (da['rte_pcc_net'] - rated['rte_pcc_net']):.1f} pp less: {deltas}."
+    )
+    return textwrap.fill(text, width=118, break_long_words=False, break_on_hyphens=False)
 
 
 def build_parameter_table() -> str:
@@ -174,7 +196,7 @@ def _jsonable(obj):
 
 
 def run_full_study(output_root: Path | None = None, weather_file: Path = DATA_FILE) -> dict:
-    """Run all six configurations, checks, sensitivity, figures, docs/data.js and README tables."""
+    """Run all duty and cooling configurations, checks, sensitivity, figures, docs/data.js and README tables."""
     root = output_root or REPO_ROOT
     results_dir = root / "results"
     docs_dir = root / "docs"
@@ -267,6 +289,7 @@ def run_full_study(output_root: Path | None = None, weather_file: Path = DATA_FI
     )
 
     blocks = {
+        "headline": build_headline(summaries),
         "results-tables": build_readme_tables(summaries, verification),
         "parameter-table": build_parameter_table(),
         "sensitivity-table": build_sensitivity_table(sens_df),

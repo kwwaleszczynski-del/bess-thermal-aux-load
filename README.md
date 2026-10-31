@@ -21,23 +21,25 @@ container hour by hour (15-minute sub-steps) over one year of ERA5 weather for C
 All inputs are stated, generic assumptions (table below), not data of a specific product, and no measured container
 data are used: the model is not validated against field measurements.
 
-Interactive dashboard: https://kwwaleszczynski-del.github.io/bess-thermal-aux-load/
+<!-- headline:start -->
+**Headline (liquid cooling, ERA5 2025):** net RTE at the PCC is **92.4 %** at 1 cycle/day with a peak of 0.18 C and
+**89.8 %** at 0.35 cycles/day (peak 0.09 C). Cycling the same 5 MWh a day at the rated 0.5 C (2 h charge, 2 h
+discharge) gives **88.2 %**, 4.2 pp less: cells +62.5 MWh/yr, transformer +18.7, auxiliaries +5.1 and PCS -1.3 (its
+no-load loss runs for fewer hours).
+<!-- headline:end -->
 
-> **Revision note (30 October 2026).** An earlier version of this repository reported numbers that were partly set
-> by factors tuned to target values (month- and duty-specific multipliers on resistance, heater and chiller
-> electricity, PCS and transformer losses, and a cell temperature-spread series rescaled to fixed maxima) and ran on
-> a synthetic weather year. Those factors are gone: every number below comes from the single parameter set in
-> [Inputs](#inputs) and real ERA5 weather. The headline net RTE changed from 84.2 % to 92.4 % (1 cycle/day, liquid)
-> and from 73.9 % to 89.8 % (0.35 cycles/day); the large winter penalty and the cell-spread comparison do not survive.
+Interactive dashboard: https://kwwaleszczynski-del.github.io/bess-thermal-aux-load/
 
 ## Key results
 
 ### 1. Round-trip efficiency at each metering boundary
 
-Three stylised duties, each a fixed daily schedule that returns to 50 % SoC every day: 0.35 cycles/day (reserve-like,
-0.09 C), 1 cycle/day (day-ahead arbitrage, up to 0.18 C) and 2 cycles/day (up to 0.225 C). RTE at a boundary is the
-energy exported there over the energy imported there in the year; auxiliaries are supplied from the MV side, so the
-net RTE at the PCC includes them.
+Four duties, each a fixed daily schedule that returns to 50 % SoC every day: three stylised ones well below the
+container's rated 0.5 C, namely 0.35 cycles/day (reserve-like, 0.09 C), 1 cycle/day (day-ahead arbitrage, up to
+0.18 C) and 2 cycles/day (up to 0.225 C), and 1 cycle/day at the rated 0.5 C (2 h charge at full power, two 1 h
+discharges, full SoC window) to show what the low C-rates are worth. RTE at a boundary is the energy exported there
+over the energy imported there in the year; auxiliaries are supplied from the MV side, so the net RTE at the PCC
+includes them.
 
 <!-- results-tables:start -->
 | Duty | Cooling | DC | PCS AC | MV, excl. aux | LV net | **PCC net** | PCC net, lowest / highest month |
@@ -48,6 +50,8 @@ net RTE at the PCC includes them.
 | 1.0 cycle/day (day-ahead) | Forced air (DX) | 97.9 % | 94.7 % | 93.6 % | 93.3 % | **92.2 %** | 92.0 % (Jul) / 92.3 % (Feb) |
 | 2.0 cycles/day (two-cycle) | Liquid (cold plates) | 97.3 % | 94.4 % | 93.4 % | 93.4 % | **92.5 %** | 92.4 % (Jul) / 92.5 % (Feb) |
 | 2.0 cycles/day (two-cycle) | Forced air (DX) | 97.3 % | 94.4 % | 93.4 % | 93.2 % | **92.3 %** | 92.1 % (Jul) / 92.4 % (Feb) |
+| 1.0 cycle/day at 0.5 C (rated power) | Liquid (cold plates) | 94.6 % | 91.6 % | 89.6 % | 90.2 % | **88.2 %** | 88.1 % (Jul) / 88.3 % (Jan) |
+| 1.0 cycle/day at 0.5 C (rated power) | Forced air (DX) | 94.7 % | 91.7 % | 89.7 % | 89.9 % | **87.9 %** | 87.5 % (Jul) / 88.2 % (Feb) |
 
 | Duty | Cooling | PCC import [MWh/yr] | Aux total [MWh/yr] | Base load | Pump / fans | Chiller | Heater | Chiller COP (annual) | Cell temp. min-max [degC] |
 |---|---|---|---|---|---|---|---|---|---|
@@ -57,10 +61,12 @@ net RTE at the PCC includes them.
 | 1.0 cycle/day (day-ahead) | Forced air (DX) | 1909 | 27.5 | 8.8 | 9.6 | 9.2 | 0.00 | 5.33 | 23.8 - 25.0 |
 | 2.0 cycles/day (two-cycle) | Liquid (cold plates) | 3800 | 38.0 | 8.8 | 11.0 | 18.3 | 0.00 | 5.95 | 24.5 - 25.0 |
 | 2.0 cycles/day (two-cycle) | Forced air (DX) | 3806 | 46.5 | 8.8 | 14.6 | 23.2 | 0.00 | 5.01 | 23.8 - 25.3 |
+| 1.0 cycle/day at 0.5 C (rated power) | Liquid (cold plates) | 1954 | 29.6 | 8.8 | 3.1 | 17.7 | 0.00 | 5.87 | 22.2 - 29.7 |
+| 1.0 cycle/day at 0.5 C (rated power) | Forced air (DX) | 1961 | 38.5 | 8.8 | 5.9 | 23.9 | 0.00 | 4.49 | 21.6 - 34.0 |
 
 | Check | Criterion | Result |
 |---|---|---|
-| Plant energy balance, 6 runs (bookkeeping) | residual < 1e-6 MWh | max 5.8e-13 MWh |
+| Plant energy balance, 8 runs (bookkeeping) | residual < 1e-6 MWh | max 5.8e-13 MWh |
 | Implicit Euler vs matrix exponential, 10 days free-floating (liquid) | cell node error < 0.1 K | cell 0.004 K, enclosure 0.031 K |
 | Implicit Euler vs matrix exponential, 10 days free-floating (air) | cell node error < 0.1 K | cell 0.071 K, enclosure 0.532 K |
 | Sub-step 15 vs 5 min, 1.0 cyc/d (liquid) | < 0.05 pp RTE, < 1 % aux | 0.000 pp, 0.27 % |
@@ -78,19 +84,24 @@ net RTE at the PCC includes them.
 | Thermal time constant of the idle container (C_total / UA_env) | 117 h |
 <!-- results-tables:end -->
 
-- **Net RTE at the PCC is 92.4 % at 1 cycle/day and 89.8 % at 0.35 cycles/day** (liquid cooling). At 1 cycle/day
-  the 145.5 MWh/yr lost between PCC import and export split into PCS conversion 59.7 MWh (41 %), cell losses 39.0 MWh
-  (27 %), auxiliaries 24.6 MWh (17 %) and transformer 22.2 MWh (15 %).
+- **Net RTE at the PCC is 92.4 % at 1 cycle/day and 89.8 % at 0.35 cycles/day** (liquid cooling, peaks of 0.18 and
+  0.09 C). At 1 cycle/day the 145.5 MWh/yr lost between PCC import and export split into PCS conversion 59.7 MWh
+  (41 %), cell losses 39.0 MWh (27 %), auxiliaries 24.6 MWh (17 %) and transformer 22.2 MWh (15 %).
+- **The low C-rates of the stylised duties flatter the result.** The same 5 MWh a day at the rated 0.5 C (rows "at
+  0.5 C") loses the amount given in the headline at the top: cell I^2R and transformer copper losses grow with the
+  square of the current, while the PCS loses slightly less because its no-load loss runs for fewer hours. The cell
+  heat at 0.5 C exceeds the 60 kW liquid cooling capacity, and the forced-air path reaches its 12 degC supply limit,
+  so neither holds the 25 degC set point (cell temperatures in the second table).
 - **Fixed losses decide the low-cycling case.** Transformer no-load loss (13.8 MWh/yr) and the control base load
   (8.8 MWh/yr) do not depend on throughput, so at 0.35 cycles/day they are 22.6 of the 69.4 MWh/yr lost, which is why
   net RTE is 2.5 pp lower than at 1 cycle/day although the DC efficiency is higher (98.5 % against 97.9 %).
 - **Weather hardly moves the result.** Monthly net RTE at 1 cycle/day ranges from 92.2 % (July) to 92.5 % (February);
   at 0.35 cycles/day from 89.0 % (July) to 90.4 % (February). Winter is the better season: the chiller runs at its
   COP limit and pumps run less.
-- **No heating is needed in any of the six runs.** The insulated envelope (79 W/K) and the heat of cell losses,
-  pumps and the 1 kW base load keep the cells between 23.2 and 25.3 degC all year, also through the coldest hour of
-  2025 (-14.4 degC, 17 February). The idle container alone would settle 12.7 K above ambient, with a thermal time
-  constant of 117 h. Heating appears only with a much leakier envelope at low cycling (U = 3 W/(m2 K): 0.26 MWh/yr).
+- **No heating is needed in any of the eight runs.** The insulated envelope (79 W/K) and the heat of cell losses,
+  pumps and the 1 kW base load keep the cells between 23.2 and 25.3 degC all year in the three stylised duties, also
+  through the coldest hour of 2025 (-14.4 degC, 17 February). The idle container alone would settle 12.7 K above
+  ambient, with a thermal time constant of 117 h. Heating appears only with a much leakier envelope at low cycling (U = 3 W/(m2 K): 0.26 MWh/yr).
   2025 was mild (February mean -1.1 degC); a 5 K colder year still needs no heating (sensitivity table).
 
 ![monthly RTE waterfall](docs/img/monthly_rte_waterfall.png)
@@ -148,8 +159,9 @@ The modelled net RTE is higher than fleet averages reported from operation, for 
 the US utility-scale battery fleet in 2019 (EIA, *Utility-scale batteries and pumped storage return about 80 % of the
 electricity they store*, 12 February 2021; to be verified for current fleets). The model leaves out much of what lowers
 metered RTE in practice: idle days and partial-power operation (frequency response), SoC recalibration cycles,
-balancing, PCS skid cooling and standby, an auxiliary transformer, cabling, reactive power, higher C-rates and cell
-ageing. Read the numbers as the efficiency of a clean, new container on a regular schedule.
+balancing, PCS skid cooling and standby, an auxiliary transformer, cabling, reactive power and cell ageing. Read the
+numbers as the efficiency of a clean, new container on a regular schedule, and those of the stylised duties as
+low-C-rate cases (compare the rows at 0.5 C).
 
 ## Inputs
 
@@ -300,6 +312,8 @@ reanalysis, *Q. J. R. Meteorol. Soc.* 146, 1999-2049.
   economiser; the COP cap stands in for it.
 - Fixed daily schedules on the chemical side, no idle days, no ageing, auxiliaries supplied at MV without an
   auxiliary transformer, transformer losses at unity power factor.
+- C-rate defined on the chemical side (|P_chem| / E_rated) with no power limit: at 0.5 C the PCS and the transformer
+  carry slightly more than their 2.5 MW / 2.5 MVA rating while charging.
 
 ## Run it
 
@@ -317,7 +331,7 @@ data/era5_central_poland_2025.csv   hourly ERA5 weather (CET)
 src/bess_thermal/
   config.py        container, cooling, chiller, PCS/transformer and duty inputs
   weather.py       ERA5 download (Open-Meteo) and loader
-  duties.py        hourly charge/discharge schedules (0.35, 1 and 2 cycles/day)
+  duties.py        hourly charge/discharge schedules (0.35, 1 and 2 cycles/day; 1 cycle/day at 0.5 C)
   physics.py       resistance, OCV, entropic heat, chiller COP, PCS and transformer losses
   simulation.py    two-node solver with HVAC control, power chain, RTE, plant energy balance
   verification.py  checks and the auxiliary surrogate
@@ -332,3 +346,14 @@ tests/
 ## License
 
 MIT.
+
+## Changes
+
+- **30 October 2026.** An earlier version reported numbers partly set by factors tuned to target values (month- and
+  duty-specific multipliers on resistance, heater and chiller electricity, PCS and transformer losses, and a cell
+  temperature-spread series rescaled to fixed maxima) and ran on a synthetic weather year. Those factors are gone:
+  every number comes from the single parameter set in [Inputs](#inputs) and real ERA5 weather. The headline net RTE
+  changed from 84.2 % to 92.4 % (1 cycle/day, liquid) and from 73.9 % to 89.8 % (0.35 cycles/day); the large winter
+  penalty and the cell-spread comparison do not survive.
+- **31 October 2026.** Added a 1 cycle/day duty at the rated 0.5 C; the three stylised duties peak at 0.09 to
+  0.225 C, which flatters RTE. The headline now states the peak C-rate of each number.

@@ -18,8 +18,8 @@ def build_hourly_duty_profile(
     Sign convention:
       - p_chem_kw > 0 : chemical discharge rate (kW leaving stored chemical energy)
       - p_chem_kw < 0 : chemical charge rate (kW entering stored chemical energy)
-      - Each 24-hour day is charge-neutral (starts and ends at 50.0% SoC), with SoC
-        strictly within [0.10, 1.00], so daily, monthly, and annual dE_stored == 0.0 MWh.
+      - Each 24-hour day is charge-neutral (starts and ends at 50.0% SoC), with SoC within
+        [0.10, 1.00] ([0.00, 1.00] for rated_100), so daily, monthly, and annual dE_stored == 0.0 MWh.
     """
     if duty_code not in DUTY_SPECS:
         raise ValueError(f"Unknown duty_code '{duty_code}'. Expected one of {list(DUTY_SPECS)}")
@@ -74,6 +74,15 @@ def build_hourly_duty_profile(
         day_p_chem[11:15] = -1125.0
         day_p_chem[16:20] = 875.0
         day_p_chem[21:23] = -500.0
+    elif duty_code == "rated_100":
+        # 1.0 cycle/day at the rated 0.5 C (2,500 kW): 2 h charge and 2 h discharge, full SoC window
+        # Starts at 2500 kWh (0.50 SoC):
+        # 07:00-08:00 discharge 2500 kWh -> 0 kWh (0.00 SoC)
+        # 11:00-13:00 charge 5000 kWh -> 5000 kWh (1.00 SoC)
+        # 18:00-19:00 discharge 2500 kWh -> 2500 kWh (0.50 SoC)
+        day_p_chem[7] = 2500.0
+        day_p_chem[11:13] = -2500.0
+        day_p_chem[18] = 2500.0
 
     p_chem_kw = np.tile(day_p_chem, n_days)
 

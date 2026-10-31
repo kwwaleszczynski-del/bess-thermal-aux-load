@@ -91,11 +91,12 @@ def generate_all_figures(
     stages = ["DC", "PCS AC", "MV excl.\naux", "LV net", "PCC net"]
     keys = ["rte_dc", "rte_pcs_ac", "rte_trafo_mv", "rte_lv_net", "rte_pcc_net"]
     x_st = np.arange(len(stages))
-    w_bar = 0.27
+    w_bar = 0.2
     bars = [
-        (("da_100", "liquid"), -w_bar, BLUE, "1.0 cyc/d, liquid"),
-        (("reserve_035", "liquid"), 0.0, RED, "0.35 cyc/d, liquid"),
-        (("heavy_200", "liquid"), w_bar, GREEN, "2.0 cyc/d, liquid"),
+        (("da_100", "liquid"), -1.5 * w_bar, BLUE, "1.0 cyc/d, liquid"),
+        (("reserve_035", "liquid"), -0.5 * w_bar, RED, "0.35 cyc/d, liquid"),
+        (("heavy_200", "liquid"), 0.5 * w_bar, GREEN, "2.0 cyc/d, liquid"),
+        (("rated_100", "liquid"), 1.5 * w_bar, PURPLE, "1.0 cyc/d at 0.5 C, liquid"),
     ]
     bar_vals = []
     for run_key, off, col, label in bars:
@@ -164,8 +165,8 @@ def generate_all_figures(
     fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(10.2, 4.1))
     _style_ax(ax_a)
     _style_ax(ax_b)
-    duties = ["reserve_035", "da_100", "heavy_200"]
-    duty_labels = ["0.35 cyc/d", "1.0 cyc/d", "2.0 cyc/d"]
+    duties = ["reserve_035", "da_100", "heavy_200", "rated_100"]
+    duty_labels = ["0.35 cyc/d", "1.0 cyc/d", "2.0 cyc/d", "1.0 cyc/d\nat 0.5 C"]
     x_d = np.arange(len(duties))
     width_d = 0.34
     bottoms = {k: np.zeros(len(duties)) for k in ("la", "aa", "lp", "ap")}
@@ -188,9 +189,9 @@ def generate_all_figures(
     ax_a.legend(loc="upper left", fontsize=7.3, frameon=True)
     ax_b.set_xticks(x_d, duty_labels, fontsize=8.5)
     ax_b.set_ylabel("Share of PCC import [%]")
-    ax_b.set_ylim(0.0, float(max(bottoms["lp"].max(), bottoms["ap"].max())) * 1.35)
+    ax_b.set_ylim(0.0, float(max(bottoms["lp"].max(), bottoms["ap"].max())) * 1.5)
     ax_b.set_title("Losses as share of PCC import (= 100 % - net RTE)", fontsize=9.5)
-    ax_b.legend(loc="upper right", fontsize=7.3, frameon=True)
+    ax_b.legend(loc="upper center", fontsize=7.3, frameon=True, ncol=2)
     _save(fig, img_dir / "loss_breakdown_duty.png")
 
     # 5. Sensitivity tornado (net PCC RTE)

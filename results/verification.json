@@ -104,6 +104,40 @@
           "pcs": 113.117809,
           "transformer": 36.287363
         }
+      },
+      {
+        "duty_code": "rated_100",
+        "cooling_code": "liquid",
+        "net_import_pcc_mwh": 230.479726,
+        "sum_terms_mwh": 230.479726,
+        "residual_mwh": 4.3655745685100554e-13,
+        "terms_mwh": {
+          "d_chemical": 0.0,
+          "d_entropic": -0.105946,
+          "d_sensible": 0.0,
+          "envelope_minus_solar": 9.368867,
+          "condenser": 121.962707,
+          "heater_loss": 0.0,
+          "pcs": 58.387175,
+          "transformer": 40.866923
+        }
+      },
+      {
+        "duty_code": "rated_100",
+        "cooling_code": "air",
+        "net_import_pcc_mwh": 236.568321,
+        "sum_terms_mwh": 236.568321,
+        "residual_mwh": 5.820766091346741e-13,
+        "terms_mwh": {
+          "d_chemical": 0.0,
+          "d_entropic": -0.237973,
+          "d_sensible": 0.0,
+          "envelope_minus_solar": 6.330132,
+          "condenser": 131.289068,
+          "heater_loss": 0.0,
+          "pcs": 58.349759,
+          "transformer": 40.837333
+        }
       }
     ]
   },

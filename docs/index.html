@@ -79,6 +79,7 @@ Companion operational reporting: <a href="https://github.com/kwwaleszczynski-del
       <option value="reserve_035">0.35 cycles/day (reserve)</option>
       <option value="da_100" selected>1 cycle/day (day-ahead)</option>
       <option value="heavy_200">2 cycles/day (two-cycle)</option>
+      <option value="rated_100">1 cycle/day at the rated 0.5 C</option>
     </select>
   </label>
   <label>Net RTE metered at
@@ -109,7 +110,7 @@ and the other cooling architecture (dashed).</p>
 
 <h2>3. Auxiliary power against ambient temperature, and annual losses by component</h2>
 <p>Left: steady auxiliary power at constant ambient temperature, no sun, idle or cycling continuously at 0.25 C and 0.5 C.
-Right: annual losses by component for the three duties with the selected cooling system.</p>
+Right: annual losses by component for the four duties with the selected cooling system.</p>
 <div class="two">
   <div class="card"><div id="plot-aux-temp" class="plot"></div></div>
   <div class="card"><div id="plot-loss-duty" class="plot"></div></div>
@@ -146,7 +147,7 @@ const pct = (x, d = 1) => x == null || isNaN(x) ? "-" : (100 * x).toFixed(d) + "
 const narrow = () => window.innerWidth < 640;
 const other = c => c === "liquid" ? "air" : "liquid";
 const COOL = {liquid: "liquid", air: "air"};
-const DUTY = {reserve_035: "0.35 cyc/d", da_100: "1 cyc/d", heavy_200: "2 cyc/d"};
+const DUTY = {reserve_035: "0.35 cyc/d", da_100: "1 cyc/d", heavy_200: "2 cyc/d", rated_100: "1 cyc/d at 0.5 C"};
 
 function layoutBase(extra) {
   return Object.assign({
@@ -172,12 +173,14 @@ function state() {
 
 function renderHeadline() {
   const da = D.runs["da_100__liquid"].summary, res = D.runs["reserve_035__liquid"].summary;
+  const rated = D.runs["rated_100__liquid"].summary;
   const cmp = D.liquid_vs_air_da100;
   document.getElementById("headline").textContent =
-    `With the stated inputs, net RTE at the 15 kV PCC is ${pct(da.rte_pcc_net)} at 1 cycle/day ` +
-    `(monthly ${pct(da.rte_pcc_month_min)} in ${da.rte_pcc_month_min_name} to ${pct(da.rte_pcc_month_max)} in ` +
-    `${da.rte_pcc_month_max_name}) and ${pct(res.rte_pcc_net)} at 0.35 cycles/day, where the transformer no-load loss ` +
-    `and the control base load weigh more per MWh cycled. Heater energy is ${fmt(da.e_heater_mwh, 2)} MWh/yr at 1 cycle/day` +
+    `With the stated inputs, net RTE at the 15 kV PCC is ${pct(da.rte_pcc_net)} at 1 cycle/day with a peak of ` +
+    `${da.max_c_rate} C (monthly ${pct(da.rte_pcc_month_min)} in ${da.rte_pcc_month_min_name} to ${pct(da.rte_pcc_month_max)} in ` +
+    `${da.rte_pcc_month_max_name}) and ${pct(res.rte_pcc_net)} at 0.35 cycles/day (peak ${res.max_c_rate} C), where the ` +
+    `transformer no-load loss and the control base load weigh more per MWh cycled. At the rated ${rated.max_c_rate} C, ` +
+    `1 cycle/day gives ${pct(rated.rte_pcc_net)}. Heater energy is ${fmt(da.e_heater_mwh, 2)} MWh/yr at 1 cycle/day` +
     (da.e_heater_mwh < 0.05 * da.e_aux_mwh ? ": cell losses, pumps and controls keep the insulated container warm. " : ". ") +
     `Forced air needs ${fmt(cmp.aux_saved_mwh, 1)} MWh/yr ` +
     `(${fmt(cmp.aux_saved_pct, 1)} %) more auxiliary energy than liquid cooling at 1 cycle/day.`;
@@ -261,7 +264,7 @@ function renderAuxAndLossPlots() {
     yaxis: axis({title: {text: "Auxiliary power [kW]", font: {size: 12}}, rangemode: "tozero"})
   }), cfg);
 
-  const duties = ["reserve_035", "da_100", "heavy_200"];
+  const duties = ["reserve_035", "da_100", "heavy_200", "rated_100"];
   const comps = [
     ["e_cell_loss_mwh", "Cell losses", "--s1"],
     ["e_pcs_mwh", "PCS", "--ink2"],
@@ -353,7 +356,7 @@ function renderTables() {
     }).join("") + "</tbody>";
 
   const V = D.verification;
-  const vRows = [["Plant energy balance, 6 runs (bookkeeping)", "residual < 1e-6 MWh", `max ${V.plant_energy_balance.max_residual_mwh.toExponential(1)} MWh`]];
+  const vRows = [[`Plant energy balance, ${V.plant_energy_balance.runs.length} runs (bookkeeping)`, "residual < 1e-6 MWh", `max ${V.plant_energy_balance.max_residual_mwh.toExponential(1)} MWh`]];
   V.integrator_vs_exact.forEach(r => vRows.push([`Implicit Euler vs matrix exponential, ${r.days} days (${r.cooling_code})`, "cell node error < 0.1 K", `cell ${fmt(r.max_abs_err_cell_k, 3)} K, enclosure ${fmt(r.max_abs_err_enclosure_k, 3)} K`]));
   V.timestep_convergence.forEach(r => vRows.push([`Sub-step ${r.substep_min[0]} vs ${r.substep_min[1]} min, 1 cyc/d (${r.cooling_code})`, "< 0.05 pp RTE, < 1 % aux", `${fmt(r.abs_diff_rte_pp, 3)} pp, ${fmt(r.abs_diff_aux_pct, 2)} %`]));
   V.idle_heater_steady_state.forEach(r => vRows.push([`Idle heater at ${r.t_amb_c} degC vs closed form (${r.cooling_code})`, "relative error < 1e-3", `${fmt(r.heater_sim_kw, 3)} vs ${fmt(r.heater_closed_form_kw, 3)} kW`]));
