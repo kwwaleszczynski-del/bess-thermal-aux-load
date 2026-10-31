@@ -107,7 +107,8 @@ def generate_all_figures(
     ax2.set_ylabel("Annual RTE [%]")
     ax2.set_ylim(np.floor(min(bar_vals)) - 3.0, 100.0)
     ax2.set_title("Annual RTE by boundary and duty", fontsize=9.5)
-    ax2.legend(loc="lower left", fontsize=7.5, frameon=True)
+    # under the axis: inside, it covered the lower part of the bars
+    ax2.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), fontsize=7.5, frameon=False, ncol=2)
     _save(fig, img_dir / "monthly_rte_waterfall.png")
 
     # 2. Steady-state auxiliary power and COP against ambient temperature
@@ -127,7 +128,7 @@ def generate_all_figures(
     ax_r.set_xlabel("Ambient temperature [degC]")
     ax_r.set_ylabel("Chiller COP [-]")
     ax_r.set_title("Effective chiller COP (Carnot fraction, capped)", fontsize=9.5)
-    ax_r.legend(loc="upper right", fontsize=8, frameon=True)
+    ax_r.legend(loc="lower left", fontsize=8, frameon=True)  # the COP curves leave the lower left empty
     _save(fig, img_dir / "aux_vs_temperature.png")
 
     # 3. Coldest and hottest week (15-min)
@@ -145,20 +146,25 @@ def generate_all_figures(
         ax0.step(t_h, [r["t_cell_c"] for r in r_liq], where="post", color=BLUE, lw=1.0, label="Cells, liquid")
         ax0.step(t_h, [r["t_cell_c"] for r in r_air], where="post", color=ORANGE, lw=1.0, ls="--", label="Cells, air")
         ax0.set_ylabel("Temperature [degC]")
-        ax0.legend(loc="lower right", fontsize=7.5, frameon=True, ncol=3)
         ax1_.step(t_h, [r["r_int_mohm"] for r in r_liq], where="post", color=NAVY, lw=0.9, label="Pack R_int, liquid")
         ax1_.step(t_h, [r["r_int_mohm"] for r in r_air], where="post", color=ORANGE, lw=0.9, ls="--", label="Pack R_int, air")
         ax1_.set_ylabel("R_int [mOhm]")
-        ax1_.legend(loc="upper right", fontsize=7.5, frameon=True)
         ax2_.step(t_h, [r["p_aux_kw"] for r in r_liq], where="post", color=BLUE, lw=0.9, label="Aux, liquid")
         ax2_.step(t_h, [r["p_aux_kw"] for r in r_air], where="post", color=RED, lw=0.9, ls="--", label="Aux, air")
         ax2_.set_ylabel("Aux power [kW]")
         ax2_.set_xlabel(f"Hours from {r_liq[0]['timestamp']} CET")
-        ax2_.legend(loc="upper right", fontsize=7.5, frameon=True)
         if week_key == "cold_week":
             ax0.set_title(f"Coldest week (1.0 cyc/d), min {w_liq['t_min_c']} degC at {w_liq['t_min_at']}", fontsize=9)
         else:
             ax0.set_title(f"Hottest week (1.0 cyc/d), max {w_liq['t_max_c']} degC at {w_liq['t_max_at']}", fontsize=9)
+    # one legend above the grid: in the panels the legends hid minima and peaks
+    handles, labels = [], []
+    for ax in axes[:, 0]:
+        h, lab = ax.get_legend_handles_labels()
+        handles += h
+        labels += lab
+    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=len(labels), fontsize=8,
+               frameon=False)
     _save(fig, img_dir / "winter_summer_week.png")
 
     # 4. Annual losses by component and duty
